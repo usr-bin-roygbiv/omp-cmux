@@ -1,0 +1,57 @@
+{
+  "name": "omp-cmux",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Expose cmux tools and synchronize OMP lifecycle state with cmux.",
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://github.com/usr-bin-roygbiv/omp-cmux",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/usr-bin-roygbiv/omp-cmux.git",
+    "directory": "plugins/cmux"
+  },
+  "files": [
+    "index.ts",
+    "src"
+  ],
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.49"
+  },
+  "peerDependencies": {
+    "@oh-my-pi/pi-coding-agent": ">=14.7.3 <18"
+  },
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "omp": {
+    "name": "cmux",
+    "version": "0.1.0",
+    "description": "Typed cmux tools, raw escape hatches, and lifecycle synchronization.",
+    "extensions": [
+      "./index.ts"
+    ],
+    "settings": {
+      "binary": {
+        "type": "string",
+        "description": "cmux executable name or path.",
+        "default": "cmux",
+        "env": "CMUX_OMP_BINARY"
+      },
+      "timeoutMs": {
+        "type": "number",
+        "description": "Maximum duration of each cmux child process in milliseconds.",
+        "default": 15000,
+        "min": 1,
+        "env": "CMUX_OMP_TIMEOUT_MS"
+      },
+      "maxOutputBytes": {
+        "type": "number",
+        "description": "Maximum captured stdout or stderr bytes per cmux child process.",
+        "default": 1048576,
+        "min": 1024,
+        "env": "CMUX_OMP_MAX_OUTPUT_BYTES"
+      }
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "omp-cmux",
+  "owner": {
+    "name": "usr-bin-roygbiv"
+  },
+  "metadata": {
+    "description": "OMP integrations for cmux",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "cmux",
+      "source": "./plugins/cmux",
+      "description": "Expose cmux tools and synchronize OMP lifecycle state with cmux.",
+      "version": "0.1.0",
+      "author": {
+        "name": "usr-bin-roygbiv"
+      },
+      "homepage": "https://github.com/usr-bin-roygbiv/omp-cmux",
+      "repository": "https://github.com/usr-bin-roygbiv/omp-cmux",
+      "license": "MIT",
+      "keywords": [
+        "omp",
+        "cmux",
+        "terminal",
+        "agent"
+      ],
+      "category": "productivity",
+      "strict": true
+    }
+  ]
+}
