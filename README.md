@@ -4,7 +4,7 @@ An [Oh My Pi (OMP)](https://omp.sh) marketplace plugin that exposes cmux through
 
 ## Prerequisites
 
-- OMP 14.7.3 through 17.x
+- OMP 17.1.3 or newer for the public Git installation flow
 - Bun (for development and tests)
 - cmux installed and running, with its CLI available on `PATH`
 - OMP launched inside the target cmux surface so `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID` identify the exact destination
