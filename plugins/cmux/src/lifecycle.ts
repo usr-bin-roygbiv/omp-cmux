@@ -266,6 +266,7 @@ export function registerCmuxLifecycle(
 			}
 			case "notify": {
 				if (!surfaceArgs) return;
+				if (effect.kind === "decision") enqueue(["trigger-flash", ...surfaceArgs]);
 				enqueue([
 					"notify",
 					"--title",
@@ -282,7 +283,13 @@ export function registerCmuxLifecycle(
 
 	const dispatch = (action: LifecycleAction): void => {
 		if (disposed) return;
-		for (const effect of machine.dispatch(action)) applyEffect(effect);
+		const effects = machine.dispatch(action);
+		for (const effect of effects) {
+			if (effect.type !== "notify" || effect.kind !== "decision") applyEffect(effect);
+		}
+		for (const effect of effects) {
+			if (effect.type === "notify" && effect.kind === "decision") applyEffect(effect);
+		}
 	};
 
 	const on = (

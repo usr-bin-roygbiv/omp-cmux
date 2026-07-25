@@ -47,7 +47,7 @@ Each tool returns readable content plus structured details. Failures are reporte
 
 ## Lifecycle synchronization
 
-cmux status follows OMP through `idle`, `working`, `thinking`, `tool`, `needs-input`, `retrying`, `compacting`, `waiting`, `done`, `error`, and `stopped`. Tool status includes the active tool name. Todo results mirror phase and item progress, while active task subagents appear by agent name and activity.
+cmux status follows OMP through `idle`, `working`, `thinking`, `tool`, `needs-input`, `retrying`, `compacting`, `waiting`, `done`, `error`, and `stopped`. Tool status includes the active tool name. Ask gates publish `Needs input`, flash the originating surface, and only then send the decision notification; resolving the matching Ask restores the derived lifecycle status. Todo results mirror phase and item progress, while active task subagents appear by agent name and activity.
 
 The plugin notifies only when:
 

@@ -131,6 +131,27 @@ describe("OMP lifecycle adapter", () => {
 			expect(argv).toContain("workspace-test");
 			expect(argv).toContain("surface-test");
 		}
+		const decisionIndex = testHarness.calls.findIndex(call => call.argv.includes("OMP needs your decision"));
+		expect(testHarness.calls[decisionIndex - 2]?.argv).toEqual([
+			"set-status",
+			"omp_plugin",
+			"Needs input",
+			"--icon",
+			"questionmark.circle",
+			"--color",
+			"#ffd60a",
+			"--priority",
+			"100",
+			"--workspace",
+			"workspace-test",
+		]);
+		expect(testHarness.calls[decisionIndex - 1]?.argv).toEqual([
+			"trigger-flash",
+			"--workspace",
+			"workspace-test",
+			"--surface",
+			"surface-test",
+		]);
 	});
 
 	test("mirrors todo and named subagents while deferring completion until the final terminal event", async () => {
