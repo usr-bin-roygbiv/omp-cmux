@@ -5,6 +5,7 @@
   "type": "module",
   "description": "OMP marketplace plugin for complete cmux integration",
   "license": "MIT",
+  "author": "usr-bin-roygbiv",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/usr-bin-roygbiv/omp-cmux.git"
@@ -24,5 +25,35 @@
   "packageManager": "bun@1.3.14",
   "workspaces": [
     "plugins/*"
-  ]
+  ],
+  "omp": {
+    "name": "cmux",
+    "version": "0.1.0",
+    "description": "Typed cmux tools, raw escape hatches, and lifecycle synchronization.",
+    "extensions": [
+      "./plugins/cmux/index.ts"
+    ],
+    "settings": {
+      "binary": {
+        "type": "string",
+        "description": "cmux executable name or path.",
+        "default": "cmux",
+        "env": "CMUX_OMP_BINARY"
+      },
+      "timeoutMs": {
+        "type": "number",
+        "description": "Maximum duration of each cmux child process in milliseconds.",
+        "default": 15000,
+        "min": 1,
+        "env": "CMUX_OMP_TIMEOUT_MS"
+      },
+      "maxOutputBytes": {
+        "type": "number",
+        "description": "Maximum captured stdout or stderr bytes per cmux child process.",
+        "default": 1048576,
+        "min": 1024,
+        "env": "CMUX_OMP_MAX_OUTPUT_BYTES"
+      }
+    }
+  }
 }

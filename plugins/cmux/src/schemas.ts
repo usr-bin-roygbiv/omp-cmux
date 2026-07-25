@@ -1,4 +1,4 @@
-import { Type, type Static } from "@sinclair/typebox";
+import { Type, type Static } from "./schema";
 
 const SafeString = Type.String({ maxLength: 65_536, pattern: "^[^\\u0000]*$" });
 const NonEmptyString = Type.String({ minLength: 1, maxLength: 65_536, pattern: "^[^\\u0000]+$" });

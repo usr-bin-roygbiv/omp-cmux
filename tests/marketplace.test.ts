@@ -64,6 +64,15 @@ describe("marketplace discovery", () => {
 		expect(typeof loaded.default).toBe("function");
 	});
 
+	test("repository root activates the extension for direct Git installs", async () => {
+		const rootPackage = await readJson(join(repositoryRoot, "package.json"));
+		const rootOmp = rootPackage.omp as Record<string, unknown>;
+		expect(rootOmp.extensions).toEqual(["./plugins/cmux/index.ts"]);
+
+		const extensionPackage = await readJson(join(repositoryRoot, "plugins", "cmux", "package.json"));
+		expect(extensionPackage.dependencies).toBeUndefined();
+	});
+
 	test("uses only the intended public project owner in marketplace identity fields", async () => {
 		const manifests = await Promise.all([
 			readJson(join(repositoryRoot, "package.json")),

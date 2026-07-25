@@ -15,9 +15,6 @@
     "index.ts",
     "src"
   ],
-  "dependencies": {
-    "@sinclair/typebox": "^0.34.49"
-  },
   "peerDependencies": {
     "@oh-my-pi/pi-coding-agent": ">=14.7.3 <18"
   },

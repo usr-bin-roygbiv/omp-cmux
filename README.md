@@ -15,16 +15,16 @@ Lifecycle mutations never fall back to the focused workspace. If either target I
 
 ```sh
 omp plugin marketplace add usr-bin-roygbiv/omp-cmux
-omp plugin install cmux@omp-cmux
+omp plugin install github:usr-bin-roygbiv/omp-cmux
 ```
 
-These commands use OMP's plugin subcommand; `omp marketplace` is not a valid top-level command. Confirm the installation with `omp plugin list`. The marketplace installs the TypeScript source directly and requires no build step.
+The marketplace command publishes the catalog entry; the Git install activates the extension from the same public repository. OMP currently does not load `omp.extensions` entrypoints directly from marketplace caches, so `omp plugin install cmux@omp-cmux` alone only caches the catalog package. Confirm the active installation with `omp plugin list` and `omp plugin doctor`.
 
 To refresh an existing installation:
 
 ```sh
 omp plugin marketplace update omp-cmux
-omp plugin upgrade cmux@omp-cmux
+omp plugin install --force github:usr-bin-roygbiv/omp-cmux
 ```
 
 ## Tools

@@ -2,6 +2,16 @@ import { describe, expect, test } from "bun:test";
 
 import { registerCmuxTools } from "../plugins/cmux/src/tools.ts";
 import type { CmuxCommandResult, CmuxRunOptions } from "../plugins/cmux/src/cmux.ts";
+import {
+	CmuxBrowserSchema,
+	CmuxCapabilitiesSchema,
+	CmuxCliSchema,
+	CmuxNotificationSchema,
+	CmuxRpcSchema,
+	CmuxSidebarSchema,
+	CmuxSurfaceSchema,
+	CmuxWorkspaceSchema,
+} from "../plugins/cmux/src/schemas.ts";
 
 type ToolDefinition = {
 	name: string;
@@ -49,6 +59,28 @@ async function execute(harness: ReturnType<typeof toolHarness>, name: string, pa
 	if (!tool) throw new Error(`tool not registered: ${name}`);
 	return tool.execute("call-1", params, signal);
 }
+
+describe("dependency-free tool schemas", () => {
+	test("emit valid JSON Schema required fields without runtime packages", () => {
+		const schemas = [
+			[CmuxCapabilitiesSchema, []],
+			[CmuxRpcSchema, ["method"]],
+			[CmuxCliSchema, ["argv"]],
+			[CmuxWorkspaceSchema, ["action"]],
+			[CmuxSurfaceSchema, ["action"]],
+			[CmuxBrowserSchema, ["action"]],
+			[CmuxNotificationSchema, ["action"]],
+			[CmuxSidebarSchema, ["action"]],
+		] as const;
+
+		for (const [schema, required] of schemas) {
+			const plain = JSON.parse(JSON.stringify(schema)) as Record<string, unknown>;
+			expect(plain.type).toBe("object");
+			expect(plain.additionalProperties).toBe(false);
+			expect(plain.required ?? []).toEqual(required);
+		}
+	});
+});
 
 describe("cmux coverage escape hatches", () => {
 	test("registers the three complete escape hatches and every high-value typed group", () => {
