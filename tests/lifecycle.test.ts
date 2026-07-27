@@ -7,7 +7,11 @@ type ExtensionHandler = (event: unknown, context: FakeContext) => void | Promise
 type BusHandler = (payload: unknown) => void;
 
 interface FakeContext {
+	hasUI: boolean;
 	hasPendingMessages(): boolean;
+	sessionManager: { getSessionId(): string };
+	setInterval(callback: () => void): Timer;
+	clearTimer(timer: Timer): void;
 }
 
 interface RunCall {
@@ -33,7 +37,13 @@ function harness() {
 	const busHandlers = new Map<string, BusHandler[]>();
 	const calls: RunCall[] = [];
 	let pendingMessages = false;
-	const context: FakeContext = { hasPendingMessages: () => pendingMessages };
+	const context: FakeContext = {
+		hasUI: true,
+		hasPendingMessages: () => pendingMessages,
+		sessionManager: { getSessionId: () => "session-test" },
+		setInterval: callback => callback as unknown as Timer,
+		clearTimer: () => undefined,
+	};
 	const api = {
 		on(event: string, handler: ExtensionHandler) {
 			const registered = handlers.get(event) ?? [];
@@ -108,6 +118,12 @@ describe("OMP lifecycle adapter", () => {
 		await testHarness.emit("tool_execution_start", { toolCallId: "ask-1", toolName: "ask" });
 		await testHarness.emit("tool_execution_end", { toolCallId: "ask-1", toolName: "ask", isError: false, result: {} });
 		await testHarness.emit("agent_end", { messages: [] });
+		await testHarness.emit("session_stop", {
+			turn_id: 1,
+			session_id: "session-test",
+			stop_hook_active: false,
+			messages: [{ role: "assistant", content: "Finished." }],
+		});
 
 		expect(mainStatuses(testHarness.calls)).toEqual([
 			"Idle",
@@ -125,7 +141,7 @@ describe("OMP lifecycle adapter", () => {
 		]);
 		const sent = notifications(testHarness.calls);
 		expect(sent).toHaveLength(2);
-		expect(sent[0]).toContain("OMP needs your decision");
+		expect(sent[0]).toContain("OMP needs your input");
 		expect(sent[1]).toContain("OMP turn complete");
 		for (const argv of sent) {
 			expect(argv).toContain("workspace-test");
@@ -168,6 +184,12 @@ describe("OMP lifecycle adapter", () => {
 		await testHarness.emitBus("task:subagent:progress", {
 			agent: "WorkerOne",
 			progress: { id: "agent-1", agent: "task", status: "completed" },
+		});
+		await testHarness.emit("session_stop", {
+			turn_id: 1,
+			session_id: "session-test",
+			stop_hook_active: false,
+			messages: [{ role: "assistant", content: "Finished." }],
 		});
 		expect(notifications(testHarness.calls)).toHaveLength(1);
 		expect(notifications(testHarness.calls)[0]).toContain("OMP turn complete");
@@ -228,7 +250,16 @@ describe("OMP lifecycle adapter", () => {
 			},
 			env: { PATH: process.env.PATH },
 		});
-		await handlers.get("session_start")?.({ type: "session_start" }, { hasPendingMessages: () => false });
+		await handlers.get("session_start")?.(
+			{ type: "session_start" },
+			{
+				hasUI: true,
+				hasPendingMessages: () => false,
+				sessionManager: { getSessionId: () => "session-test" },
+				setInterval: callback => callback as unknown as Timer,
+				clearTimer: () => undefined,
+			},
+		);
 		await Bun.sleep(0);
 		expect(calls).toEqual([]);
 	});

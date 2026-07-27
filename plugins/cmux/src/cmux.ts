@@ -32,6 +32,10 @@ const SAFE_ENVIRONMENT_KEYS = new Set([
 	"CMUX_TAB_ID",
 	"CMUX_PANEL_ID",
 	"CMUX_TAG",
+	"CMUX_TUI_SOCKET",
+	"CMUX_TUI_SURFACE_ID",
+	"CMUX_TUI_WORKSPACE_ID",
+	"CMUX_MUX_SOCKET",
 ]);
 
 export interface CmuxTarget {
