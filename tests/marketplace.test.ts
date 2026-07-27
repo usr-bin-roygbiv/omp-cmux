@@ -75,6 +75,12 @@ describe("marketplace discovery", () => {
 		expect(extensionPackage.dependencies).toBeUndefined();
 	});
 
+	test("links the repository root so development cannot activate a duplicate extension package", async () => {
+		const readme = await readFile(join(repositoryRoot, "README.md"), "utf8");
+		expect(readme).toContain("omp plugin link .");
+		expect(readme).not.toContain("omp plugin link ./plugins/cmux");
+	});
+
 	test("uses only the intended public project owner in marketplace identity fields", async () => {
 		const manifests = await Promise.all([
 			readJson(join(repositoryRoot, "package.json")),

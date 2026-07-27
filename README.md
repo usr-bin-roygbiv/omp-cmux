@@ -64,6 +64,8 @@ Both native paths receive the same semantic subtitle: `Waiting`, `Permission`, `
 
 Each semantic event is deduplicated by its stable session/tool-call or session/turn identity. Aborted turns and stops already owned by another stop hook are suppressed. Root/UI gating prevents subagents and headless sessions from producing lifecycle effects. A root interactive session inside remote tmux without a cmux surface retains the session-entry notification fallback. The entrypoint sets `CMUX_OMP_HOOKS_DISABLED=1` before registration to prevent duplicate legacy hooks.
 
+Package loading may finish after OMP has already emitted `session_start`, so the first `before_agent_start` event also activates and resets lifecycle state. Final status is settled authoritatively from `session_stop`; completion, input, blocked, error, and aborted outcomes therefore cannot leave cmux stuck on `Thinking` when `agent_end` is missing or delayed.
+
 ## Configuration
 
 The manifest exposes these non-secret environment overrides:
@@ -110,11 +112,13 @@ CMUX_LIFECYCLE_INTEGRATION=1 bun test tests/integration/lifecycle.live.test.ts
 CMUX_TUI_LIFECYCLE_INTEGRATION=1 bun test tests/integration/tui-lifecycle.live.test.ts
 ```
 
-For local OMP development, link the source plugin:
+For local OMP development, link the repository root:
 
 ```sh
-omp plugin link ./plugins/cmux
+omp plugin link .
 ```
+
+The repository root is the same extension package used by direct Git installs. Linking `./plugins/cmux` beside an installed root package would activate the lifecycle adapter twice, duplicating every status update and notification.
 
 ## Publish
 
