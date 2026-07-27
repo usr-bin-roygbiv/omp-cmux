@@ -102,6 +102,13 @@ function notifications(calls: RunCall[]): string[][] {
 	return commands(calls, "notify");
 }
 
+function lastCommandIndex(calls: RunCall[], predicate: (call: RunCall) => boolean): number {
+	for (let index = calls.length - 1; index >= 0; index -= 1) {
+		if (predicate(calls[index]!)) return index;
+	}
+	return -1;
+}
+
 describe("OMP lifecycle adapter", () => {
 	test("routes every primary lifecycle status and only the two allowed notifications", async () => {
 		const testHarness = harness();
@@ -114,9 +121,9 @@ describe("OMP lifecycle adapter", () => {
 		await testHarness.emit("auto_retry_end", { success: true, attempt: 2 });
 		await testHarness.emit("auto_compaction_start");
 		await testHarness.emit("auto_compaction_end", { aborted: false, willRetry: false });
-		await testHarness.emit("tool_execution_start", { toolCallId: "ask-1", toolName: "ask" });
-		await testHarness.emit("tool_execution_start", { toolCallId: "ask-1", toolName: "ask" });
-		await testHarness.emit("tool_execution_end", { toolCallId: "ask-1", toolName: "ask", isError: false, result: {} });
+		await testHarness.emit("tool_execution_start", { toolCallId: "ask-1", toolName: "mcp.ask" });
+		await testHarness.emit("tool_execution_start", { toolCallId: "ask-1", toolName: "mcp.ask" });
+		await testHarness.emit("tool_execution_end", { toolCallId: "ask-1", toolName: "mcp.ask", isError: false, result: {} });
 		await testHarness.emit("agent_end", { messages: [] });
 		await testHarness.emit("session_stop", {
 			turn_id: 1,
@@ -146,6 +153,90 @@ describe("OMP lifecycle adapter", () => {
 		for (const argv of sent) {
 			expect(argv).toContain("workspace-test");
 			expect(argv).toContain("surface-test");
+		}
+		const decisionIndex = testHarness.calls.findIndex(call => call.argv.includes("OMP needs your input"));
+		expect(testHarness.calls[decisionIndex - 2]?.argv).toEqual([
+			"set-status",
+			"omp_plugin",
+			"Needs input",
+			"--icon",
+			"questionmark.circle",
+			"--color",
+			"#ffd60a",
+			"--priority",
+			"100",
+			"--workspace",
+			"workspace-test",
+		]);
+		expect(testHarness.calls[decisionIndex - 1]?.argv).toEqual([
+			"trigger-flash",
+			"--workspace",
+			"workspace-test",
+			"--surface",
+			"surface-test",
+		]);
+	});
+
+	test("settles final GUI status and notification from session_stop without requiring agent_end", async () => {
+		const cases = [
+			{
+				message: { role: "assistant", content: "Finished." },
+				status: "Done",
+				title: "OMP turn complete",
+				subtitle: "Completed",
+			},
+			{
+				message: { role: "assistant", content: "Please choose a deployment." },
+				status: "Needs input",
+				title: "OMP needs your input",
+				subtitle: "Waiting",
+			},
+			{
+				message: { role: "assistant", content: "Cannot comply.", stopReason: "blocked" },
+				status: "Needs input",
+				title: "OMP turn blocked",
+				subtitle: "Blocked",
+			},
+			{
+				message: { role: "assistant", content: "", errorMessage: "provider failed" },
+				status: "Error",
+				title: "OMP turn failed",
+				subtitle: "Error",
+			},
+			{
+				message: { role: "assistant", content: "cancelled", stopReason: "aborted" },
+				status: "Stopped",
+				title: undefined,
+				subtitle: undefined,
+			},
+		] as const;
+
+		for (const [index, scenario] of cases.entries()) {
+			const testHarness = harness();
+			await testHarness.emit("session_start");
+			await testHarness.emit("before_agent_start");
+			await testHarness.emit("agent_start");
+			await testHarness.emit("message_start", { message: { role: "assistant" } });
+			await testHarness.emit("session_stop", {
+				turn_id: index + 1,
+				session_id: "session-test",
+				stop_hook_active: false,
+				messages: [],
+				last_assistant_message: scenario.message,
+			});
+
+			expect(mainStatuses(testHarness.calls).at(-1)).toBe(scenario.status);
+			const sent = notifications(testHarness.calls);
+			if (!scenario.title) {
+				expect(sent).toEqual([]);
+				continue;
+			}
+			expect(sent).toHaveLength(1);
+			expect(sent[0]).toContain(scenario.title);
+			expect(sent[0]).toContain(scenario.subtitle);
+			const statusIndex = lastCommandIndex(testHarness.calls, call => call.argv[0] === "set-status" && call.argv[1] === "omp_plugin");
+			const notificationIndex = lastCommandIndex(testHarness.calls, call => call.argv[0] === "notify");
+			expect(statusIndex).toBeLessThan(notificationIndex);
 		}
 	});
 

@@ -394,10 +394,10 @@ export function registerCmuxLifecycle(
 		}
 	};
 
-	const dispatch = (action: LifecycleAction): void => {
+	const dispatch = (action: LifecycleAction, updateTui = true): void => {
 		if (disposed || !rootActive) return;
 		for (const effect of machine.dispatch(action)) applyEffect(effect);
-		reportTui();
+		if (updateTui) reportTui();
 	};
 
 	const remoteTmuxContext = (ctx: ExtensionContext): boolean => ctx.hasUI === true && backend === "gui" && !surfaceArgs && Boolean(text(targetEnv.TMUX));
@@ -463,7 +463,10 @@ export function registerCmuxLifecycle(
 		if (id && name) dispatch({ type: "tool-start", id, name });
 		if (id && isAskToolName(name)) {
 			const sessionId = contextSessionId(ctx);
-			if (sessionId) notifyOnce(`${sessionId}:ask:${id}`, "input", ctx, "OMP is waiting for your response");
+			if (sessionId) {
+				if (backend === "gui" && surfaceArgs) enqueue(["trigger-flash", ...surfaceArgs]);
+				notifyOnce(`${sessionId}:ask:${id}`, "input", ctx, "OMP is waiting for your response");
+			}
 		}
 	});
 	on("tool_approval_requested", (event, ctx) => {
@@ -515,7 +518,7 @@ export function registerCmuxLifecycle(
 		if (!rootActive) return;
 		stopTelemetry();
 		const settlement = classifyFinalSettlement(event.last_assistant_message ?? finalAssistantMessage(event.messages));
-		if (settlement.kind === "error") dispatch({ type: "error" });
+		dispatch({ type: "session-stop", outcome: settlement.kind }, false);
 		const state: TuiAgentState = settlement.kind === "completion" ? "done" : settlement.kind === "error" ? "error" : settlement.kind === "input" || settlement.kind === "blocked" ? "blocked" : "unknown";
 		const finalDetail = settlement.text || (settlement.kind === "suppress" ? "Stopped" : notificationPresentation(settlement.kind, "").body);
 		reportTui(state, finalDetail);

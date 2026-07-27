@@ -49,7 +49,7 @@ Each tool returns readable content plus structured details. Failures are reporte
 
 ## Lifecycle synchronization
 
-GUI cmux status follows OMP through `idle`, `working`, `thinking`, `tool`, `needs-input`, `retrying`, `compacting`, `waiting`, `done`, `error`, and `stopped`. Tool status includes the active tool name. Todo results mirror phase and item progress, while active task subagents appear by agent name and activity.
+GUI cmux status follows OMP through `idle`, `working`, `thinking`, `tool`, `needs-input`, `retrying`, `compacting`, `waiting`, `done`, `error`, and `stopped`. Tool status includes the active tool name. Ask gates publish `Needs input`, flash the originating surface, and only then send the decision notification; resolving the matching Ask restores the derived lifecycle status. Todo results mirror phase and item progress, while active task subagents appear by agent name and activity.
 
 In cmux TUI, the same lifecycle is sent through `cmux-tui report-agent` to the numeric injected surface. Reports include the session label and detail, start time, completed and total tasks, running async jobs, and the root agent plus live subagents. The plugin reads jobs only through OMP's public `AsyncJobManager` export. A single bounded polling timer refreshes job counts while a turn is active and is cleared at turn stop or session shutdown.
 
