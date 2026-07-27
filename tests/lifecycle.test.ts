@@ -110,6 +110,22 @@ function lastCommandIndex(calls: RunCall[], predicate: (call: RunCall) => boolea
 }
 
 describe("OMP lifecycle adapter", () => {
+	test("activates on the first prompt when plugin loading misses session_start", async () => {
+		const testHarness = harness();
+		await testHarness.emit("before_agent_start");
+		await testHarness.emit("agent_start");
+		await testHarness.emit("session_stop", {
+			turn_id: 1,
+			session_id: "session-test",
+			stop_hook_active: false,
+			messages: [{ role: "assistant", content: "Finished." }],
+		});
+
+		expect(mainStatuses(testHarness.calls)).toEqual(["Idle", "Working", "Thinking", "Done"]);
+		expect(notifications(testHarness.calls)).toHaveLength(1);
+		expect(notifications(testHarness.calls)[0]).toContain("OMP turn complete");
+	});
+
 	test("routes every primary lifecycle status and only the two allowed notifications", async () => {
 		const testHarness = harness();
 		await testHarness.emit("session_start");

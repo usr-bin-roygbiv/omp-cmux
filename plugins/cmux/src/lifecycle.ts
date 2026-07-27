@@ -446,7 +446,7 @@ export function registerCmuxLifecycle(
 	on("session_switch", sessionStart);
 	on("session_branch", sessionStart);
 	on("before_agent_start", (event, ctx) => {
-		if (!rootActive) return;
+		if (!rootActive) sessionStart({ type: "session_start" }, ctx);
 		startTelemetry(ctx);
 		const sessionId = contextSessionId(ctx);
 		if (sessionId) promptGenerationBySession.set(sessionId, (promptGenerationBySession.get(sessionId) ?? 0) + 1);
