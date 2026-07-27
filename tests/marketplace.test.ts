@@ -19,7 +19,9 @@ async function repositoryTextFiles(directory = repositoryRoot): Promise<string[]
 			if (!ignoredDirectories.has(entry.name)) files.push(...(await repositoryTextFiles(join(directory, entry.name))));
 			continue;
 		}
-		if (entry.isFile() && textExtensions.has(extname(entry.name))) files.push(join(directory, entry.name));
+		if (entry.isFile() && !ignoredDirectories.has(entry.name) && textExtensions.has(extname(entry.name))) {
+			files.push(join(directory, entry.name));
+		}
 	}
 	return files;
 }
