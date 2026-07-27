@@ -40,6 +40,12 @@
         "default": "cmux",
         "env": "CMUX_OMP_BINARY"
       },
+      "tuiBinary": {
+        "type": "string",
+        "description": "cmux TUI executable name or path.",
+        "default": "cmux-tui",
+        "env": "CMUX_OMP_TUI_BINARY"
+      },
       "timeoutMs": {
         "type": "number",
         "description": "Maximum duration of each cmux child process in milliseconds.",

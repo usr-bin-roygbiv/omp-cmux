@@ -72,6 +72,7 @@ export type LifecycleAction =
 	| { type: "compaction-end"; error?: boolean; aborted?: boolean; willRetry?: boolean }
 	| { type: "pending-messages"; pending: boolean }
 	| { type: "agent-end"; pendingMessages: boolean; willContinue?: boolean; isError?: boolean }
+	| { type: "session-stop"; outcome: "completion" | "input" | "blocked" | "error" | "suppress" }
 	| { type: "cancel" }
 	| { type: "error" }
 	| { type: "shutdown" }
@@ -188,6 +189,7 @@ export class LifecycleStateMachine {
 	#toolOrder = 0;
 	#tools = new Map<string, ToolActivity>();
 	#needsInput = new Set<string>();
+	#settledInput = false;
 	#decisionNotified = new Set<string>();
 	#subagents = new Map<string, SubagentSnapshot>();
 	#terminalSubagents = new Set<string>();
@@ -225,6 +227,7 @@ export class LifecycleStateMachine {
 				this.#pendingMessages = false;
 				this.#error = false;
 				this.#cancelled = false;
+				this.#settledInput = false;
 				break;
 			case "turn-start":
 				if (this.#shutdown) break;
@@ -251,7 +254,7 @@ export class LifecycleStateMachine {
 				this.#thinking = false;
 				this.#error = false;
 				this.#tools.set(action.id, { name: action.name, order: ++this.#toolOrder });
-				if (action.name === "ask") {
+				if (action.name === "ask" || action.name.endsWith(".ask")) {
 					this.#needsInput.add(action.id);
 					if (!this.#decisionNotified.has(action.id)) {
 						this.#decisionNotified.add(action.id);
@@ -311,6 +314,21 @@ export class LifecycleStateMachine {
 				this.#pendingMessages = action.pendingMessages;
 				this.#turnEnded = !action.willContinue;
 				if (action.isError) this.#error = true;
+				break;
+			case "session-stop":
+				if (this.#shutdown) break;
+				this.#agentRunning = false;
+				this.#thinking = false;
+				this.#turnEnded = true;
+				this.#pendingMessages = false;
+				this.#compacting = false;
+				this.#retrying = false;
+				this.#retryLabel = undefined;
+				this.#tools.clear();
+				this.#needsInput.clear();
+				this.#settledInput = action.outcome === "input" || action.outcome === "blocked";
+				this.#error = action.outcome === "error";
+				this.#cancelled = action.outcome === "suppress";
 				break;
 			case "cancel":
 				if (this.#shutdown) break;
@@ -403,6 +421,7 @@ export class LifecycleStateMachine {
 		this.#retryLabel = undefined;
 		this.#tools.clear();
 		this.#needsInput.clear();
+		this.#settledInput = false;
 		this.#decisionNotified.clear();
 		this.#subagents.clear();
 		this.#terminalSubagents.clear();
@@ -441,7 +460,7 @@ export class LifecycleStateMachine {
 			this.#statusText = "Error";
 			return;
 		}
-		if (this.#needsInput.size > 0) {
+		if (this.#settledInput || this.#needsInput.size > 0) {
 			this.#status = "needs-input";
 			this.#statusText = "Needs input";
 			return;

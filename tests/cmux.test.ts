@@ -77,6 +77,10 @@ describe("safe cmux process execution", () => {
 				CMUX_SOCKET_PATH: "/temporary/socket",
 				CMUX_SOCKET_PASSWORD: "socket-secret",
 				CMUX_WORKSPACE_ID: "workspace-1",
+				CMUX_TUI_SOCKET: "/temporary/tui.sock",
+				CMUX_TUI_SURFACE_ID: "17",
+				CMUX_TUI_WORKSPACE_ID: "3",
+				CMUX_MUX_SOCKET: "/temporary/mux.sock",
 				AWS_SECRET_ACCESS_KEY: "must-not-leak",
 				GITHUB_TOKEN: "must-not-leak",
 				SSH_AUTH_SOCK: "/must/not/leak",
@@ -92,6 +96,10 @@ describe("safe cmux process execution", () => {
 			CMUX_SOCKET_PATH: "/temporary/socket",
 			CMUX_SOCKET_PASSWORD: "socket-secret",
 			CMUX_WORKSPACE_ID: "workspace-1",
+			CMUX_TUI_SOCKET: "/temporary/tui.sock",
+			CMUX_TUI_SURFACE_ID: "17",
+			CMUX_TUI_WORKSPACE_ID: "3",
+			CMUX_MUX_SOCKET: "/temporary/mux.sock",
 			CMUX_OMP_HOOKS_DISABLED: "1",
 		});
 	});

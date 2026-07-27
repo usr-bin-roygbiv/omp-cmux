@@ -19,7 +19,9 @@ async function repositoryTextFiles(directory = repositoryRoot): Promise<string[]
 			if (!ignoredDirectories.has(entry.name)) files.push(...(await repositoryTextFiles(join(directory, entry.name))));
 			continue;
 		}
-		if (entry.isFile() && textExtensions.has(extname(entry.name))) files.push(join(directory, entry.name));
+		if (entry.isFile() && !ignoredDirectories.has(entry.name) && textExtensions.has(extname(entry.name))) {
+			files.push(join(directory, entry.name));
+		}
 	}
 	return files;
 }
@@ -71,6 +73,12 @@ describe("marketplace discovery", () => {
 
 		const extensionPackage = await readJson(join(repositoryRoot, "plugins", "cmux", "package.json"));
 		expect(extensionPackage.dependencies).toBeUndefined();
+	});
+
+	test("links the repository root so development cannot activate a duplicate extension package", async () => {
+		const readme = await readFile(join(repositoryRoot, "README.md"), "utf8");
+		expect(readme).toContain("omp plugin link .");
+		expect(readme).not.toContain("omp plugin link ./plugins/cmux");
 	});
 
 	test("uses only the intended public project owner in marketplace identity fields", async () => {

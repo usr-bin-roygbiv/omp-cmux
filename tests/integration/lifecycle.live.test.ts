@@ -7,7 +7,15 @@ const workspaceId = process.env.CMUX_WORKSPACE_ID;
 const surfaceId = process.env.CMUX_SURFACE_ID;
 const liveTest = process.env.CMUX_LIFECYCLE_INTEGRATION === "1" && workspaceId && surfaceId ? test : test.skip;
 
-type ExtensionHandler = (event: unknown, context: { hasPendingMessages(): boolean }) => void | Promise<void>;
+interface LiveContext {
+	hasUI: boolean;
+	hasPendingMessages(): boolean;
+	sessionManager: { getSessionId(): string };
+	setInterval(callback: () => void, ms?: number): Timer;
+	clearTimer(timer: Timer): void;
+}
+
+type ExtensionHandler = (event: unknown, context: LiveContext) => void | Promise<void>;
 type BusHandler = (payload: unknown) => void;
 
 liveTest(
@@ -15,7 +23,17 @@ liveTest(
 	async () => {
 		const handlers = new Map<string, ExtensionHandler[]>();
 		const busHandlers = new Map<string, BusHandler[]>();
-		const context = { hasPendingMessages: () => false };
+		const context: LiveContext = {
+			hasUI: true,
+			hasPendingMessages: () => false,
+			sessionManager: { getSessionId: () => "omp-cmux-gui-live-probe" },
+			setInterval(callback, ms = 1_000) {
+				const timer = setInterval(callback, ms);
+				timer.unref();
+				return timer;
+			},
+			clearTimer: timer => clearInterval(timer),
+		};
 		const api = {
 			on(event: string, handler: ExtensionHandler) {
 				const registered = handlers.get(event) ?? [];
@@ -124,7 +142,7 @@ liveTest(
 			await waitForSidebar("progress=0.50 Verification: Finish");
 			await emit("agent_end", { messages: [] });
 			await waitForSidebar("  omp_plugin=Waiting for 1 subagent");
-			expect((await listedNotifications()).filter(item => item.title === "OMP needs your decision")).toHaveLength(1);
+			expect((await listedNotifications()).filter(item => item.title === "OMP needs your input")).toHaveLength(1);
 			expect((await listedNotifications()).filter(item => item.title === "OMP turn complete")).toHaveLength(0);
 
 			emitBus("task:subagent:progress", {
@@ -132,17 +150,36 @@ liveTest(
 				progress: { id: "agent-1", status: "completed" },
 			});
 			await waitForSidebar("  omp_plugin=Done");
+			await emit("session_stop", {
+				turn_id: 1,
+				session_id: "omp-cmux-gui-live-probe",
+				stop_hook_active: false,
+				messages: [{ role: "assistant", content: "Probe complete." }],
+			});
 			const completed = await listedNotifications();
 			expect(completed.filter(item => item.title === "OMP turn complete")).toHaveLength(1);
 
 			await emit("before_agent_start");
 			await emit("message_end", { message: { role: "assistant", errorMessage: "provider failed" } });
 			await emit("agent_end", { messages: [{ role: "assistant", errorMessage: "provider failed" }] });
+			await emit("session_stop", {
+				turn_id: 2,
+				session_id: "omp-cmux-gui-live-probe",
+				stop_hook_active: false,
+				messages: [{ role: "assistant", errorMessage: "provider failed" }],
+			});
 			await waitForSidebar("  omp_plugin=Error");
 			expect((await listedNotifications()).filter(item => item.title === "OMP turn complete")).toHaveLength(1);
+			expect((await listedNotifications()).filter(item => item.title === "OMP turn failed")).toHaveLength(1);
 
 			await emit("before_agent_start");
 			await emit("agent_end", { messages: [{ role: "assistant", stopReason: "aborted" }] });
+			await emit("session_stop", {
+				turn_id: 3,
+				session_id: "omp-cmux-gui-live-probe",
+				stop_hook_active: false,
+				messages: [{ role: "assistant", stopReason: "aborted" }],
+			});
 			await waitForSidebar("  omp_plugin=Stopped");
 			expect((await listedNotifications()).filter(item => item.title === "OMP turn complete")).toHaveLength(1);
 		} finally {

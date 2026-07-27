@@ -6,10 +6,12 @@ An [Oh My Pi (OMP)](https://omp.sh) marketplace plugin that exposes cmux through
 
 - OMP 17.1.3 or newer for the public Git installation flow
 - Bun (for development and tests)
-- cmux installed and running, with its CLI available on `PATH`
-- OMP launched inside the target cmux surface so `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID` identify the exact destination
+- cmux GUI or a protocol-11-or-newer `cmux-tui` installed and running, with its CLI available on `PATH`
+- OMP launched inside the target backend:
+  - GUI cmux supplies `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`.
+  - cmux TUI supplies `CMUX_TUI_SOCKET`, a numeric `CMUX_TUI_SURFACE_ID`, and `CMUX_TUI_WORKSPACE_ID`.
 
-Lifecycle mutations never fall back to the focused workspace. If either target ID is unavailable, restore the cmux-provided environment rather than targeting an unrelated workspace.
+Lifecycle mutations never fall back to focused state. The plugin selects cmux TUI whenever `CMUX_TUI_SOCKET` is present and otherwise retains GUI routing. Missing or invalid required IDs fail closed.
 
 ## Install
 
@@ -47,14 +49,22 @@ Each tool returns readable content plus structured details. Failures are reporte
 
 ## Lifecycle synchronization
 
-cmux status follows OMP through `idle`, `working`, `thinking`, `tool`, `needs-input`, `retrying`, `compacting`, `waiting`, `done`, `error`, and `stopped`. Tool status includes the active tool name. Ask gates publish `Needs input`, flash the originating surface, and only then send the decision notification; resolving the matching Ask restores the derived lifecycle status. Todo results mirror phase and item progress, while active task subagents appear by agent name and activity.
+GUI cmux status follows OMP through `idle`, `working`, `thinking`, `tool`, `needs-input`, `retrying`, `compacting`, `waiting`, `done`, `error`, and `stopped`. Tool status includes the active tool name. Ask gates publish `Needs input`, flash the originating surface, and only then send the decision notification; resolving the matching Ask restores the derived lifecycle status. Todo results mirror phase and item progress, while active task subagents appear by agent name and activity.
 
-The plugin notifies only when:
+In cmux TUI, the same lifecycle is sent through `cmux-tui report-agent` to the numeric injected surface. Reports include the session label and detail, start time, completed and total tasks, running async jobs, and the root agent plus live subagents. The plugin reads jobs only through OMP's public `AsyncJobManager` export. A single bounded polling timer refreshes job counts while a turn is active and is cleared at turn stop or session shutdown.
 
-1. OMP's `ask` tool requests an explicit decision; or
-2. a turn is fully complete, with no pending messages and no live or queued subagents.
+Native backend notifications are emitted for:
 
-Completion after `agent_end` is deferred until the final subagent exits. Errors, routine status changes, and intermediate agent endings do not notify. The entrypoint sets `CMUX_OMP_HOOKS_DISABLED=1` before registration to prevent duplicate notifications from legacy hooks.
+1. an `ask` tool request;
+2. a tool-approval request;
+3. a successful `xd://propose` plan submission; and
+4. the final `session_stop`, classified as completion, input required, blocked, or error.
+
+Both native paths receive the same semantic subtitle: `Waiting`, `Permission`, `Plan Ready`, `Completed`, `Blocked`, or `Error`. cmux TUI subtitle support requires protocol 11.
+
+Each semantic event is deduplicated by its stable session/tool-call or session/turn identity. Aborted turns and stops already owned by another stop hook are suppressed. Root/UI gating prevents subagents and headless sessions from producing lifecycle effects. A root interactive session inside remote tmux without a cmux surface retains the session-entry notification fallback. The entrypoint sets `CMUX_OMP_HOOKS_DISABLED=1` before registration to prevent duplicate legacy hooks.
+
+Package loading may finish after OMP has already emitted `session_start`, so the first `before_agent_start` event also activates and resets lifecycle state. Final status is settled authoritatively from `session_stop`; completion, input, blocked, error, and aborted outcomes therefore cannot leave cmux stuck on `Thinking` when `agent_end` is missing or delayed.
 
 ## Configuration
 
@@ -63,10 +73,11 @@ The manifest exposes these non-secret environment overrides:
 | Variable | Default | Purpose |
 | --- | ---: | --- |
 | `CMUX_OMP_BINARY` | `cmux` | Executable name or path |
+| `CMUX_OMP_TUI_BINARY` | `cmux-tui` | cmux TUI executable name or path |
 | `CMUX_OMP_TIMEOUT_MS` | `15000` | Child-process timeout in milliseconds |
 | `CMUX_OMP_MAX_OUTPUT_BYTES` | `1048576` | Maximum captured bytes for each output stream |
 
-cmux supplies routing and socket variables for its sessions. The plugin forwards only an allowlist of safe process variables plus the cmux routing/socket variables to direct cmux children; socket credentials are never forwarded to unrelated processes.
+cmux supplies routing and socket variables for its sessions. The plugin forwards only an allowlist of safe process variables plus the GUI or TUI routing/socket variables to direct children; socket credentials are never forwarded to unrelated processes.
 
 ## Privacy and remote troubleshooting
 
@@ -75,8 +86,8 @@ The repository contains no telemetry and the plugin does not add any network ser
 For remote or nested sessions:
 
 1. Run `omp plugin doctor` and `omp plugin list`.
-2. Confirm that the cmux executable is reachable and that both target ID variables are **set**; do not paste their values.
-3. Confirm that the trusted transport preserves the cmux socket variables. Never post socket paths or passwords in logs or support requests.
+2. Confirm that the correct executable is reachable and that the selected backend's routing variables are **set**; do not paste their values.
+3. For GUI, preserve both GUI target IDs. For TUI, preserve `CMUX_TUI_SOCKET` and the numeric TUI surface ID. Never post socket paths or passwords in logs or support requests.
 4. Increase `CMUX_OMP_TIMEOUT_MS` only for a known slow connection. Keep the output limit bounded.
 
 Report versions, tool error categories, and whether required variables are set—not hostnames, local paths, IDs, socket values, tokens, or captured workspace content.
@@ -91,11 +102,23 @@ bun test
 
 The default tests use mocked processes and do not require a live cmux instance.
 
-For local OMP development, link the source plugin:
+The live helpers are opt-in and are never run by the default suite. With OMP already launched in the destination backend, run exactly one matching helper:
 
 ```sh
-omp plugin link ./plugins/cmux
+# GUI cmux (requires CMUX_WORKSPACE_ID and CMUX_SURFACE_ID)
+CMUX_LIFECYCLE_INTEGRATION=1 bun test tests/integration/lifecycle.live.test.ts
+
+# cmux TUI (requires CMUX_TUI_SOCKET and numeric CMUX_TUI_SURFACE_ID)
+CMUX_TUI_LIFECYCLE_INTEGRATION=1 bun test tests/integration/tui-lifecycle.live.test.ts
 ```
+
+For local OMP development, link the repository root:
+
+```sh
+omp plugin link .
+```
+
+The repository root is the same extension package used by direct Git installs. Linking `./plugins/cmux` beside an installed root package would activate the lifecycle adapter twice, duplicating every status update and notification.
 
 ## Publish
 
