@@ -31,31 +31,34 @@ omp plugin install --force github:usr-bin-roygbiv/omp-cmux
 
 ## Tools
 
-The plugin registers typed, high-value tools for common operations:
+The plugin detects one backend for every tool call. `CMUX_TUI_SOCKET` selects TUI before any GUI variables; GUI requires both `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`; incomplete and unavailable routes fail closed.
 
-- `cmux_workspace` — workspace actions
-- `cmux_surface` — surface actions
-- `cmux_browser` — browser actions
-- `cmux_notification` — notifications
-- `cmux_sidebar` — sidebar state
+Five typed tools cover common operations with exact targets:
 
-Three escape hatches preserve access to the complete, evolving cmux API:
+- `cmux_workspace` — list, create, close, and rename workspaces in both backends, plus the complete GUI workspace action set.
+- `cmux_surface` — create, split, inspect, read, control, resume, and close GUI surfaces; TUI maps its supported subset to `list-workspaces`, `new-tab`, `split`, `read-screen`, `read-scrollback`, `send`, `send-key`, and `close-surface`.
+- `cmux_browser` — complete GUI WKWebView command coverage and exact TUI browser-tab creation through `new-browser-tab`. TUI does not expose GUI selector/DOM automation.
+- `cmux_notification` — native notifications in both backends; GUI additionally supports listing, dismissal, read state, opening, jumping, and clearing.
+- `cmux_sidebar` — GUI status, progress, logs, custom sidebars, and right-sidebar visibility. TUI sidebar plugins remain available through the raw CLI.
 
-- `cmux_capabilities` discovers the capabilities available from the installed cmux version.
-- `cmux_rpc` invokes an arbitrary cmux RPC method.
-- `cmux_cli` runs a cmux CLI argument vector directly, without a shell.
+Three escape hatches preserve access to the complete, evolving source contracts:
+
+- `cmux_capabilities` runs GUI capability discovery or TUI `--json identify`, then returns the detected backend and source-derived GUI command or TUI CLI/protocol inventories.
+- `cmux_rpc` invokes arbitrary GUI JSON-RPC methods. It rejects TUI calls before execution because the TUI has no JSON-RPC endpoint.
+- `cmux_cli` runs an explicit argument vector against the detected backend binary without a shell. It covers every source-listed GUI command and every TUI CLI verb, including future commands before a typed mapping exists.
 
 Each tool returns readable content plus structured details. Failures are reported as tool errors, cancellation stops the child process, and captured output is bounded.
 
-Typed operations encode the native GUI contracts that are easy to misapply through the raw CLI:
+Typed operations also encode native contracts that are easy to misapply through raw CLI calls:
 
-- `cmux_surface read` retries only the exact transient `Failed to read terminal text` startup race, with a bounded delay window.
-- Browser surfaces are created through `cmux_browser open` or `new`; `cmux_surface create` rejects `type: browser` because native `new-surface` can return a non-operable browser handle.
+- Mutations never resolve a focused workspace, pane, or surface. GUI uses explicit or injected workspace and surface IDs; TUI requires numeric workspace, pane, or surface IDs as appropriate.
+- `cmux_surface read` retries only the exact transient `Failed to read terminal text` GUI startup race, with a bounded delay window.
+- Browser surfaces are created through `cmux_browser open` or `new`; GUI `cmux_surface create` rejects `type: browser`, while TUI browser creation requires an explicit `--pane` argument.
 - `cmux_surface send_key` normalizes common aliases such as `CTRL_B`, `C-b`, `CTRL_C`, `ESC`, `ENTER`, and `LEFT` to native positional key names.
-- Successful typed closes report the requested workspace and surface rather than cmux's newly selected neighboring surface.
-- Targeted browser actions validate both exact identities but pass the native leading `--surface` flag; use `snapshot` and a returned ref or standard CSS. Playwright `:has-text` selectors and WKWebView `network`/`input_mouse` actions are unsupported.
+- Successful GUI typed closes report the requested workspace and surface rather than cmux's newly selected neighboring surface.
+- Targeted GUI browser actions validate both exact identities but pass the native leading `--surface` flag. Use `snapshot` and a returned ref or standard CSS; Playwright `:has-text` selectors and WKWebView `network`/`input_mouse` actions remain unsupported even though the upstream command registry exposes their names.
 
-Prefer typed tools. For unavoidable GUI `cmux_cli` calls, use top-level `read-screen`, `close-surface`, and `list-panels`, plus positional `send-key KEY`. Do not invent `surface read`, `surface close`, `list-surfaces`, `--key`, or a command string without an argv array. Native `open` expects a local path rather than a `file://` URL; use browser navigation for URLs. TUI syntax is separate and requires its socket.
+Prefer typed tools. For unavoidable GUI `cmux_cli` calls, use top-level `read-screen`, `close-surface`, and `list-panels`, plus positional `send-key KEY`. Do not invent `surface read`, `surface close`, `list-surfaces`, `--key`, or a command string without an argv array. Native `open` expects a local path rather than a `file://` URL; use browser navigation for URLs. TUI syntax is a separate, versioned CLI contract.
 
 ## Lifecycle synchronization
 
@@ -105,22 +108,30 @@ Report versions, tool error categories, and whether required variables are set�
 ## Develop and test
 
 ```sh
-bun install
+bun install --frozen-lockfile
 bun run typecheck
 bun test
 ```
 
-The default tests use mocked processes and do not require a live cmux instance.
+The default tests use mocked processes and do not require a live cmux instance. Woodpecker runs the same frozen OMP contract and a second lane that installs the latest OMP release, on pushes, pull requests, manual runs, and the configured compatibility cron schedule.
 
-The live helpers are opt-in and are never run by the default suite. With OMP already launched in the destination backend, run exactly one matching helper:
+Live helpers are opt-in and never run in the default suite. Launch OMP inside the destination backend, then run only the matching helper:
 
 ```sh
-# GUI cmux (requires CMUX_WORKSPACE_ID and CMUX_SURFACE_ID)
+# Read-only GUI or TUI tool discovery
+CMUX_INTEGRATION=1 bun test tests/integration/cmux.live.test.ts
+
+# Owned TUI workspace action smoke; creates, exercises, and removes its own workspace
+CMUX_TUI_ACTIONS_INTEGRATION=1 bun test tests/integration/tui-actions.live.test.ts
+
+# GUI lifecycle (requires complete GUI workspace and surface identities)
 CMUX_LIFECYCLE_INTEGRATION=1 bun test tests/integration/lifecycle.live.test.ts
 
-# cmux TUI (requires CMUX_TUI_SOCKET and numeric CMUX_TUI_SURFACE_ID)
+# TUI lifecycle (requires a TUI socket and numeric surface identity)
 CMUX_TUI_LIFECYCLE_INTEGRATION=1 bun test tests/integration/tui-lifecycle.live.test.ts
 ```
+
+The TUI action smoke restores the previously active workspace and closes only resources whose generated smoke name it owns.
 
 For local OMP development, link the repository root:
 

@@ -40,6 +40,8 @@ const SAFE_ENVIRONMENT_KEYS = new Set([
 	"CMUX_MUX_SOCKET",
 ]);
 
+export type CmuxBackend = "gui" | "tui";
+
 export interface CmuxTarget {
 	workspaceId?: string;
 	surfaceId?: string;
@@ -110,23 +112,49 @@ function exactIdentity(value: string | undefined, label: string): string {
 	return validateArg(normalized, label);
 }
 
-/** Select the native GUI CLI for complete Darwin GUI sessions, despite stale inherited TUI configuration. */
+/** Detect the active cmux backend without consulting focused application state. */
+export function detectCmuxBackend(env: NodeJS.ProcessEnv = process.env): CmuxBackend {
+	if (env.CMUX_TUI_SOCKET?.trim()) return "tui";
+	const hasWorkspace = Boolean(env.CMUX_WORKSPACE_ID?.trim());
+	const hasSurface = Boolean(env.CMUX_SURFACE_ID?.trim());
+	if (hasWorkspace && hasSurface) return "gui";
+	if (hasWorkspace || hasSurface) {
+		throw new TypeError("incomplete cmux GUI route; both CMUX_WORKSPACE_ID and CMUX_SURFACE_ID are required");
+	}
+	throw new TypeError("no cmux GUI or TUI route is available");
+}
+
+/** Select the configured binary for one already-detected backend. */
+export function resolveCmuxBackendBinary(
+	backend: CmuxBackend,
+	env: NodeJS.ProcessEnv = process.env,
+	cwd = process.cwd(),
+	platform: NodeJS.Platform = process.platform,
+): string {
+	if (backend === "tui") return resolveCmuxBinary(env.CMUX_OMP_TUI_BINARY ?? env.CMUX_OMP_BINARY, cwd, "cmux-tui");
+	if (platform === "darwin") return resolveCmuxBinary(CMUX_GUI_BINARY, cwd, "cmux");
+	return resolveCmuxBinary(env.CMUX_OMP_BINARY, cwd, "cmux");
+}
+
+/** Select a binary for direct callers while retaining the legacy non-cmux fallback. */
 export function selectCmuxBinary(
 	env: NodeJS.ProcessEnv = process.env,
 	platform: NodeJS.Platform = process.platform,
 ): string | undefined {
-	const hasGuiTarget = Boolean(env.CMUX_WORKSPACE_ID?.trim() && env.CMUX_SURFACE_ID?.trim());
-	const hasTuiSocket = Boolean(env.CMUX_TUI_SOCKET?.trim());
-	if (platform === "darwin" && hasGuiTarget && !hasTuiSocket) return CMUX_GUI_BINARY;
-	return env.CMUX_OMP_BINARY;
+	try {
+		return resolveCmuxBackendBinary(detectCmuxBackend(env), env, process.cwd(), platform);
+	} catch {
+		return env.CMUX_OMP_BINARY;
+	}
 }
 
 /** Resolve an explicit binary path without ever invoking a shell. */
 export function resolveCmuxBinary(
 	override = process.env.CMUX_OMP_BINARY,
 	cwd = process.cwd(),
+	fallback = "cmux",
 ): string {
-	const candidate = override?.trim() || "cmux";
+	const candidate = override?.trim() || fallback;
 	validateArg(candidate, "cmux binary");
 	if (!candidate.includes("/") && !candidate.includes("\\")) return candidate;
 	const absolute = isAbsolute(candidate) ? candidate : resolve(cwd, candidate);
@@ -170,6 +198,22 @@ export function exactSurfaceTarget(
 		workspaceId: exactWorkspaceTarget(target.workspaceId, env),
 		surfaceId: exactIdentity(target.surfaceId ?? env.CMUX_SURFACE_ID, "surface identity"),
 	};
+}
+
+function exactTuiIdentity(value: string | undefined, label: string): string {
+	const identity = exactIdentity(value, label);
+	if (!/^[1-9][0-9]*$/.test(identity)) throw new TypeError(`${label} must be a positive numeric cmux TUI identity`);
+	return identity;
+}
+
+/** Resolve a TUI workspace only from an explicit value or injected identity. */
+export function exactTuiWorkspaceTarget(explicit?: string, env: NodeJS.ProcessEnv = process.env): string {
+	return exactTuiIdentity(explicit ?? env.CMUX_TUI_WORKSPACE_ID, "TUI workspace identity");
+}
+
+/** Resolve a TUI surface only from an explicit value or injected identity. */
+export function exactTuiSurfaceTarget(explicit?: string, env: NodeJS.ProcessEnv = process.env): string {
+	return exactTuiIdentity(explicit ?? env.CMUX_TUI_SURFACE_ID, "TUI surface identity");
 }
 
 /** Build explicit CLI routing flags and fail closed when the required identity is absent. */

@@ -81,6 +81,16 @@ describe("marketplace discovery", () => {
 		expect(readme).not.toContain("omp plugin link ./plugins/cmux");
 	});
 
+	test("publishes one matching release version across manifests", async () => {
+		const root = await readJson(join(repositoryRoot, "package.json"));
+		const plugin = await readJson(join(repositoryRoot, "plugins", "cmux", "package.json"));
+		const catalog = await readJson(join(repositoryRoot, ".claude-plugin", "marketplace.json"));
+		const catalogPlugins = catalog.plugins as Array<Record<string, unknown>>;
+		expect([root.version, (root.omp as Record<string, unknown>).version, plugin.version, (plugin.omp as Record<string, unknown>).version, (catalog.metadata as Record<string, unknown>).version, catalogPlugins[0]?.version]).toEqual([
+			"0.2.0", "0.2.0", "0.2.0", "0.2.0", "0.2.0", "0.2.0",
+		]);
+	});
+
 	test("uses only the intended public project owner in marketplace identity fields", async () => {
 		const manifests = await Promise.all([
 			readJson(join(repositoryRoot, "package.json")),

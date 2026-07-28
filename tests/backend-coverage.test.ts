@@ -13,6 +13,7 @@ import {
 	CMUX_GUI_BROWSER_ACTIONS,
 	CMUX_GUI_COMMANDS,
 	CMUX_TUI_COMMANDS,
+	CMUX_TUI_PROTOCOL_COMMANDS,
 } from "../plugins/cmux/src/source-contracts.ts";
 import { CmuxBrowserSchema } from "../plugins/cmux/src/schemas.ts";
 import { registerCmuxTools } from "../plugins/cmux/src/tools.ts";
@@ -31,7 +32,7 @@ type ToolDefinition = {
 
 type RunCall = { argv: string[]; options: CmuxRunOptions };
 
-type CommandContract = { source: string; commands: string[] };
+type CommandContract = { source: string; commands: string[]; protocolSource?: string; protocolCommands?: string[] };
 
 const GUI_ENV: NodeJS.ProcessEnv = {
 	PATH: "/tools",
@@ -115,18 +116,23 @@ describe("source-derived total command coverage", () => {
 		const tui = contract("cmux-tui-commands.json");
 		expect(gui.source).toMatch(/^https:\/\/github\.com\/manaflow-ai\/cmux\/blob\/main\//);
 		expect(tui.source).toMatch(/^https:\/\/github\.com\/manaflow-ai\/cmux\/blob\/main\//);
+		expect(tui.protocolSource).toMatch(/^https:\/\/github\.com\/manaflow-ai\/cmux\/blob\/main\//);
 		expect(gui.commands).toHaveLength(163);
-		expect(tui.commands).toHaveLength(58);
+		expect(tui.commands).toHaveLength(62);
+		expect(tui.protocolCommands).toHaveLength(87);
 		expect(new Set(gui.commands).size).toBe(gui.commands.length);
 		expect(new Set(tui.commands).size).toBe(tui.commands.length);
-		expect(CMUX_GUI_COMMANDS).toEqual(gui.commands);
-		expect(CMUX_TUI_COMMANDS).toEqual(tui.commands);
+		expect(new Set(tui.protocolCommands ?? []).size).toBe(tui.protocolCommands?.length ?? 0);
+		expect(gui.commands).toEqual([...CMUX_GUI_COMMANDS]);
+		expect(tui.commands).toEqual([...CMUX_TUI_COMMANDS]);
+		expect(tui.protocolCommands).toEqual([...CMUX_TUI_PROTOCOL_COMMANDS]);
 	});
 
 	test("keeps every documented GUI browser action in the schema and executable mapping", async () => {
-		const actions = (CmuxBrowserSchema.properties.action.anyOf as Array<{ const: string }>).map(entry => entry.const);
-		expect(actions).toEqual(CMUX_GUI_BROWSER_ACTIONS);
-		expect(actions).toHaveLength(61);
+		const schema = CmuxBrowserSchema as unknown as { properties: { action: { anyOf: Array<{ const: string }> } } };
+		const actions = schema.properties.action.anyOf.map(entry => entry.const);
+		expect(actions).toEqual([...CMUX_GUI_BROWSER_ACTIONS]);
+		expect(actions).toHaveLength(63);
 		const harness = toolHarness(GUI_ENV);
 		for (const action of actions) {
 			const result = await execute(harness, "cmux_browser", { action, arguments: ["contract-argument"] });
@@ -146,7 +152,7 @@ describe("source-derived total command coverage", () => {
 				const result = await execute(harness, "cmux_cli", { argv: [command, "--help"] });
 				expect(result.isError, `${backend}:${command}`).toBe(false);
 			}
-			expect(harness.calls.map(call => call.argv[0])).toEqual(commands);
+			expect(harness.calls.map(call => call.argv[0])).toEqual([...commands]);
 			expect(harness.calls.every(call => call.options.binary === (backend === "tui" ? "cmux-tui-test" : "cmux-gui-test"))).toBe(true);
 		}
 	});
@@ -165,7 +171,7 @@ describe("TUI-aware typed tools", () => {
 			details: {
 				backend: "tui",
 				json: { protocol: 10, session: "test" },
-				sourceContract: { commands: CMUX_TUI_COMMANDS },
+				sourceContract: { commands: [...CMUX_TUI_COMMANDS], protocolCommands: [...CMUX_TUI_PROTOCOL_COMMANDS] },
 			},
 		});
 	});
@@ -194,14 +200,14 @@ describe("TUI-aware typed tools", () => {
 		await execute(harness, "cmux_surface", { action: "read", scrollback: true, lines: 12 });
 		await execute(harness, "cmux_surface", { action: "send_key", key: "CTRL+C" });
 		await execute(harness, "cmux_browser", { action: "open", arguments: ["--url", "https://example.test", "--pane", "3"] });
-		await execute(harness, "cmux_notification", { action: "send", title: "Done", body: "Ready" });
+		await execute(harness, "cmux_notification", { action: "send", title: "Done", body: "Ready", level: "warning" });
 		expect(harness.calls.map(call => call.argv)).toEqual([
 			["--json", "list-workspaces"],
 			["--json", "rename-workspace", "--workspace", "4", "--name", "Build"],
 			["--json", "read-scrollback", "--surface", "17", "--start", "0", "--count", "12"],
 			["--json", "send-key", "--surface", "17", "ctrl+c"],
 			["--json", "new-browser-tab", "--url", "https://example.test", "--pane", "3"],
-			["--json", "notify", "--title", "Done", "--body", "Ready", "--surface", "17"],
+			["--json", "notify", "--title", "Done", "--body", "Ready", "--level", "warning", "--surface", "17"],
 		]);
 	});
 
@@ -218,6 +224,8 @@ describe("TUI-aware typed tools", () => {
 describe("cluster update CI", () => {
 	test("runs locked and latest OMP compatibility in untrusted Kubernetes on push, PR, manual, and cron", () => {
 		const pipeline = readFileSync(resolve(import.meta.dir, "../.woodpecker.yml"), "utf8");
+		const packageJson = JSON.parse(readFileSync(resolve(import.meta.dir, "../package.json"), "utf8")) as { devDependencies: Record<string, string> };
+		expect(packageJson.devDependencies["@oh-my-pi/pi-coding-agent"]).toBe("17.1.8");
 		for (const event of ["push", "pull_request", "manual", "cron"]) expect(pipeline).toContain(`- ${event}`);
 		expect(pipeline).toContain("locked-omp-contract:");
 		expect(pipeline).toContain("latest-omp-contract:");

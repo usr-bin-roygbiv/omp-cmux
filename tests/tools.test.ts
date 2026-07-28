@@ -40,7 +40,15 @@ function commandResult(overrides: Partial<CmuxCommandResult> = {}): CmuxCommandR
 	};
 }
 
-function toolHarness(result: CmuxCommandResult | CmuxCommandResult[] = commandResult()) {
+function toolHarness(
+	result: CmuxCommandResult | CmuxCommandResult[] = commandResult(),
+	env: NodeJS.ProcessEnv = {
+		PATH: "/tools",
+		CMUX_WORKSPACE_ID: "workspace-from-harness",
+		CMUX_SURFACE_ID: "surface-from-harness",
+		CMUX_OMP_BINARY: "cmux-test",
+	},
+) {
 	const tools = new Map<string, ToolDefinition>();
 	const calls: RunCall[] = [];
 	let resultIndex = 0;
@@ -50,14 +58,15 @@ function toolHarness(result: CmuxCommandResult | CmuxCommandResult[] = commandRe
 		},
 	};
 	const run = async (argv: readonly string[], options: CmuxRunOptions = {}) => {
-		calls.push({ argv: [...argv], options });
+		const { binary: _binary, env: _env, ...legacyOptions } = options;
+		calls.push({ argv: [...argv], options: legacyOptions });
 		if (!Array.isArray(result)) return result;
 		const selected = result[Math.min(resultIndex, result.length - 1)];
 		resultIndex += 1;
 		if (!selected) throw new Error("tool harness requires at least one command result");
 		return selected;
 	};
-	registerCmuxTools(api as never, { run });
+	registerCmuxTools(api as never, { run, env });
 	return { tools, calls };
 }
 
@@ -465,22 +474,11 @@ describe("typed cmux argv translation", () => {
 		]);
 	});
 
-	test("fails closed before execution when a targeted typed action has no exact identity", async () => {
-		const previousWorkspace = process.env.CMUX_WORKSPACE_ID;
-		const previousSurface = process.env.CMUX_SURFACE_ID;
-		delete process.env.CMUX_WORKSPACE_ID;
-		delete process.env.CMUX_SURFACE_ID;
-		try {
-			const harness = toolHarness();
-			const result = await execute(harness, "cmux_surface", { action: "close" });
-			expect(harness.calls).toEqual([]);
-			expect(result).toMatchObject({ isError: true, details: { operation: "validation" } });
-			expect(result.content[0]!.text).toMatch(/workspace identity is required/i);
-		} finally {
-			if (previousWorkspace === undefined) delete process.env.CMUX_WORKSPACE_ID;
-			else process.env.CMUX_WORKSPACE_ID = previousWorkspace;
-			if (previousSurface === undefined) delete process.env.CMUX_SURFACE_ID;
-			else process.env.CMUX_SURFACE_ID = previousSurface;
-		}
+	test("fails closed before execution when no complete cmux route is available", async () => {
+		const harness = toolHarness(commandResult(), {});
+		const result = await execute(harness, "cmux_surface", { action: "close" });
+		expect(harness.calls).toEqual([]);
+		expect(result).toMatchObject({ isError: true, details: { operation: "validation" } });
+		expect(result.content[0]!.text).toMatch(/no cmux GUI or TUI route is available/i);
 	});
 });

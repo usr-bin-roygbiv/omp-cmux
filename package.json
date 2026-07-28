@@ -1,6 +1,6 @@
 {
   "name": "omp-cmux-marketplace",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "OMP marketplace plugin for complete cmux integration",
@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@oh-my-pi/pi-coding-agent": "17.0.7",
+    "@oh-my-pi/pi-coding-agent": "17.1.8",
     "@types/bun": "^1.2.22",
     "typescript": "^5.9.3"
   },
@@ -28,7 +28,7 @@
   ],
   "omp": {
     "name": "cmux",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Typed cmux tools, raw escape hatches, and lifecycle synchronization.",
     "extensions": [
       "./plugins/cmux/index.ts"

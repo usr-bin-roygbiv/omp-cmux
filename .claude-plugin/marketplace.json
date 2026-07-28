@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "OMP integrations for cmux",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "plugins": [
     {
       "name": "cmux",
       "source": "./plugins/cmux",
       "description": "Expose cmux tools and synchronize OMP lifecycle state with cmux.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "author": {
         "name": "usr-bin-roygbiv"
       },

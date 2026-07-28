@@ -168,6 +168,7 @@ export const CmuxNotificationSchema = Type.Object(
 		title: Type.Optional(NonEmptyString),
 		subtitle: Type.Optional(SafeString),
 		body: Type.Optional(SafeString),
+		level: Type.Optional(Type.Union([Type.Literal("info"), Type.Literal("warning"), Type.Literal("error")])),
 		all: Type.Optional(Type.Boolean()),
 		all_read: Type.Optional(Type.Boolean()),
 		timeout_ms: Timeout,

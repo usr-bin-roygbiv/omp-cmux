@@ -1,6 +1,6 @@
 {
   "name": "omp-cmux",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Expose cmux tools and synchronize OMP lifecycle state with cmux.",
   "type": "module",
@@ -23,7 +23,7 @@
   },
   "omp": {
     "name": "cmux",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Typed cmux tools, raw escape hatches, and lifecycle synchronization.",
     "extensions": [
       "./index.ts"
