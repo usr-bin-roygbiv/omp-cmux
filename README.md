@@ -6,10 +6,10 @@ An [Oh My Pi (OMP)](https://omp.sh) marketplace plugin that exposes cmux through
 
 - OMP 17.1.3 or newer for the public Git installation flow
 - Bun (for development and tests)
-- cmux GUI or `cmux-tui` `0.9.6` or newer installed and running, with its CLI available on `PATH`
+- cmux GUI or `cmux-tui` protocol 12 or newer installed and running, with its CLI available on `PATH`
 - OMP launched inside the target backend:
   - GUI cmux supplies `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`.
-  - cmux TUI supplies `CMUX_TUI_SOCKET`; a numeric `CMUX_TUI_SURFACE_ID` remains the preferred exact target when available. With cmux TUI 0.9.6, the plugin can recover an omitted surface ID only when exactly one registered surface process is the current OMP process or its direct parent.
+  - cmux TUI supplies `CMUX_TUI_SOCKET`; a numeric `CMUX_TUI_SURFACE_ID` remains the preferred exact target. When the surface ID is omitted, the plugin recovers it only when exactly one registered surface process is the current OMP process or its direct parent.
 
 Lifecycle mutations never fall back to focused state. The plugin selects cmux TUI whenever `CMUX_TUI_SOCKET` is present. On Darwin, complete GUI workspace and surface identities force `/Applications/cmux.app/Contents/Resources/bin/cmux`, even when the process inherited a stale `CMUX_OMP_BINARY` pointing at npm `cmux-tui`. Missing GUI IDs and missing, invalid, stale, or ambiguous TUI process ownership fail closed.
 
@@ -64,7 +64,7 @@ Prefer typed tools. For unavoidable GUI `cmux_cli` calls, use top-level `read-sc
 
 GUI cmux status follows OMP through `idle`, `working`, `thinking`, `tool`, `needs-input`, `retrying`, `compacting`, `waiting`, `done`, `error`, and `stopped`. Tool status includes the active tool name. Ask gates publish `Needs input`, flash the originating surface, and only then send the decision notification; resolving the matching Ask restores the derived lifecycle status. Todo results mirror phase and item progress, while active task subagents appear by agent name and activity.
 
-In cmux TUI, lifecycle state is sent through the stable `cmux-tui report-agent` schema to the numeric injected surface. Each report contains only the cross-version fields accepted by npm `cmux` `0.9.6` / protocol 10: surface, state, source, and the optional OMP session ID. A single bounded timer refreshes the current lifecycle state and is cleared at turn stop or session shutdown; unsupported private/rich flags are never emitted.
+In cmux TUI, lifecycle state is sent through the protocol 12 `cmux-tui report-agent` schema to the numeric injected surface. The plugin reports exactly one root record labeled `OMP`, including session state, lifecycle detail, elapsed start time, todo progress, running jobs, and the active-agent total. Subagent activity is folded into that root record's detail and `agents_active` field; it never creates another agent record or native notification.
 
 Native backend notifications are emitted for:
 
