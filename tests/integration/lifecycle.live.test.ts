@@ -88,6 +88,13 @@ liveTest(
 			const parsed = parseCmuxJson<unknown>(output);
 			return Array.isArray(parsed) ? (parsed as Array<Record<string, unknown>>) : [];
 		};
+		const waitForNotificationCount = async (title: string, expected: number) => {
+			for (let attempt = 0; attempt < 80; attempt += 1) {
+				const notifications = await listedNotifications();
+				if (notifications.filter(item => item.title === title).length === expected) return notifications;
+			}
+			throw new Error(`notification ${JSON.stringify(title)} never reached count ${expected}; failures=${JSON.stringify(lifecycleFailures)} commands=${JSON.stringify(lifecycleCommands.slice(-20))}`);
+		};
 
 		await command(["clear-notifications", "--workspace", workspaceId!]);
 		try {
@@ -156,8 +163,7 @@ liveTest(
 				stop_hook_active: false,
 				messages: [{ role: "assistant", content: "Probe complete." }],
 			});
-			const completed = await listedNotifications();
-			expect(completed.filter(item => item.title === "OMP turn complete")).toHaveLength(1);
+			await waitForNotificationCount("OMP turn complete", 1);
 
 			await emit("before_agent_start");
 			await emit("message_end", { message: { role: "assistant", errorMessage: "provider failed" } });
@@ -169,8 +175,7 @@ liveTest(
 				messages: [{ role: "assistant", errorMessage: "provider failed" }],
 			});
 			await waitForSidebar("  omp_plugin=Error");
-			expect((await listedNotifications()).filter(item => item.title === "OMP turn complete")).toHaveLength(1);
-			expect((await listedNotifications()).filter(item => item.title === "OMP turn failed")).toHaveLength(1);
+			const failed = await waitForNotificationCount("OMP turn failed", 1);
 
 			await emit("before_agent_start");
 			await emit("agent_end", { messages: [{ role: "assistant", stopReason: "aborted" }] });
@@ -181,7 +186,8 @@ liveTest(
 				messages: [{ role: "assistant", stopReason: "aborted" }],
 			});
 			await waitForSidebar("  omp_plugin=Stopped");
-			expect((await listedNotifications()).filter(item => item.title === "OMP turn complete")).toHaveLength(1);
+			const stopped = await listedNotifications();
+			expect(stopped).toEqual(failed);
 		} finally {
 			await dispose();
 			const cleaned = await waitForSidebar("progress=none");
