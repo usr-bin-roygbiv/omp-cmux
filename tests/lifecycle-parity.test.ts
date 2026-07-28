@@ -13,8 +13,16 @@ interface EntryCall {
 	type: string;
 	data: unknown;
 }
+interface HarnessCalls {
+	calls: RunCall[];
+}
 
-type Handler = (event: any, context: any) => void | Promise<void>;
+interface TickHarness {
+	tick(): Promise<void>;
+}
+
+
+type Handler = (event: unknown, context: unknown) => unknown | Promise<unknown>;
 
 function okResult(stdout = ""): CmuxCommandResult {
 	return {
@@ -33,6 +41,7 @@ function lifecycleHarness(env: NodeJS.ProcessEnv, options: {
 	hasUI?: boolean;
 	pid?: number;
 	ppid?: number;
+	hostname?: () => string;
 	runResult?: (argv: readonly string[]) => CmuxCommandResult;
 } = {}) {
 	const handlers = new Map<string, Handler[]>();
@@ -81,6 +90,7 @@ function lifecycleHarness(env: NodeJS.ProcessEnv, options: {
 		run,
 		...(options.pid === undefined ? {} : { pid: options.pid }),
 		...(options.ppid === undefined ? {} : { ppid: options.ppid }),
+		...(options.hostname === undefined ? {} : { hostname: options.hostname }),
 	});
 	return {
 		calls,
@@ -91,25 +101,27 @@ function lifecycleHarness(env: NodeJS.ProcessEnv, options: {
 			pending = value;
 		},
 		async emit(event: string, payload: unknown = { type: event }, overrideContext = context) {
-			for (const handler of handlers.get(event) ?? []) await handler(payload, overrideContext);
-			await Bun.sleep(0);
+			const results: unknown[] = [];
+			for (const handler of handlers.get(event) ?? []) results.push(await handler(payload, overrideContext));
+			await Promise.resolve();
+			return results;
 		},
 		async emitBus(channel: string, payload: unknown) {
 			for (const handler of busHandlers.get(channel) ?? []) handler(payload);
-			await Bun.sleep(0);
+			await Promise.resolve();
 		},
 		async tick() {
 			for (const callback of [...intervals]) callback();
-			await Bun.sleep(0);
+			await Promise.resolve();
 		},
 	};
 }
 
-function tuiCalls(harness: ReturnType<typeof lifecycleHarness>, command: string): RunCall[] {
+function tuiCalls(harness: HarnessCalls, command: string): RunCall[] {
 	return harness.calls.filter(call => call.options.binary === "cmux-tui" && call.argv[0] === command);
 }
 
-function guiCalls(harness: ReturnType<typeof lifecycleHarness>, command: string): RunCall[] {
+function guiCalls(harness: HarnessCalls, command: string): RunCall[] {
 	return harness.calls.filter(call => call.options.binary !== "cmux-tui" && call.argv[0] === command);
 }
 
@@ -118,9 +130,10 @@ function option(argv: string[], name: string): string | undefined {
 	return index >= 0 ? argv[index + 1] : undefined;
 }
 
-async function flush(harness: ReturnType<typeof lifecycleHarness>) {
-	await Bun.sleep(0);
+async function flush(harness: TickHarness) {
+	for (let index = 0; index < 8; index += 1) await Promise.resolve();
 	await harness.tick();
+	for (let index = 0; index < 8; index += 1) await Promise.resolve();
 }
 
 afterEach(() => {
@@ -263,9 +276,39 @@ describe("TUI lifecycle backend", () => {
 	});
 });
 
+describe("runtime environment context", () => {
+	test("injects the exact machine and GUI or TUI interface for root and headless agents", async () => {
+		const gui = lifecycleHarness(
+			{ PATH: process.env.PATH, CMUX_WORKSPACE_ID: "workspace-gui", CMUX_SURFACE_ID: "surface-gui" },
+			{ hostname: () => "zacbook.local" },
+		);
+		const guiResults = await gui.emit("before_agent_start", { prompt: "GUI prompt", systemPrompt: ["base"] });
+		expect(guiResults).toEqual([{ systemPrompt: ["base", "<runtime-environment>\nMachine: zacbook\nOMP interface: cmux GUI\n</runtime-environment>"] }]);
+		await gui.dispose();
+
+		const tui = lifecycleHarness(
+			{ PATH: process.env.PATH, CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock", CMUX_TUI_SURFACE_ID: "7" },
+			{ hostname: () => "davailocal" },
+		);
+		const tuiResults = await tui.emit("before_agent_start", { prompt: "TUI prompt", systemPrompt: ["base"] });
+		expect(tuiResults).toEqual([{ systemPrompt: ["base", "<runtime-environment>\nMachine: davailocal\nOMP interface: cmux TUI\n</runtime-environment>"] }]);
+		await tui.dispose();
+
+		const headless = lifecycleHarness(
+			{ PATH: process.env.PATH, CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock", CMUX_TUI_SURFACE_ID: "8" },
+			{ hasUI: false, hostname: () => "epyc-omp-workspace" },
+		);
+		const headlessResults = await headless.emit("before_agent_start", { prompt: "Task", systemPrompt: ["base"] });
+		expect(headlessResults).toEqual([{ systemPrompt: ["base", "<runtime-environment>\nMachine: epyc-omp-workspace\nOMP interface: headless agent under cmux TUI\n</runtime-environment>"] }]);
+		expect(headless.calls).toEqual([]);
+		await headless.dispose();
+	});
+
+});
+
 describe("semantic notifications", () => {
 	test("uses native TUI notify for ask, approval, successful plan, and classified final outcomes with exact dedupe", async () => {
-		const harness = lifecycleHarness({ PATH: process.env.PATH, CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock", CMUX_TUI_SURFACE_ID: "5" });
+		const harness = lifecycleHarness({ PATH: process.env.PATH, HOSTNAME: "davailocal", CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock", CMUX_TUI_SURFACE_ID: "5" });
 		await harness.emit("session_start");
 		await harness.emit("before_agent_start", { prompt: "First prompt" });
 		await harness.emit("tool_execution_start", { toolCallId: "ask-1", toolName: "mcp.ask" });
@@ -304,21 +347,19 @@ describe("semantic notifications", () => {
 			"OMP plan ready",
 			"OMP needs your input",
 		]);
-		expect(notifications.map(argv => option(argv, "--subtitle"))).toEqual([
-			"Waiting",
-			"Permission",
-			"Plan Ready",
-			"Waiting",
-		]);
+		for (const argv of notifications) {
+			expect(argv).not.toContain("--subtitle");
+			expect(option(argv, "--body")).toContain("Session: davailocal · cmux TUI");
+		}
 		for (const argv of notifications) expect(option(argv, "--surface")).toBe("5");
 		await harness.dispose();
 	});
 
 	test("classifies completion, blocked, and error settlements and suppresses aborted or stop-hook-owned turns", async () => {
 		const cases = [
-			[{ role: "assistant", content: "All done." }, "OMP turn complete", "info", "Completed"],
-			[{ role: "assistant", content: "Cannot comply.", stopReason: "blocked" }, "OMP turn blocked", "warning", "Blocked"],
-			[{ role: "assistant", content: "", errorMessage: "provider failed" }, "OMP turn failed", "error", "Error"],
+			[{ role: "assistant", content: "All done." }, "OMP turn complete", "info"],
+			[{ role: "assistant", content: "Cannot comply.", stopReason: "blocked" }, "OMP turn blocked", "warning"],
+			[{ role: "assistant", content: "", errorMessage: "provider failed" }, "OMP turn failed", "error"],
 		] as const;
 		for (let index = 0; index < cases.length; index += 1) {
 			const harness = lifecycleHarness({ PATH: process.env.PATH, CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock", CMUX_TUI_SURFACE_ID: "4" });
@@ -335,7 +376,7 @@ describe("semantic notifications", () => {
 			const notification = tuiCalls(harness, "notify").at(-1)!.argv;
 			expect(option(notification, "--title")).toBe(cases[index]![1]);
 			expect(option(notification, "--level")).toBe(cases[index]![2]);
-			expect(option(notification, "--subtitle")).toBe(cases[index]![3]);
+			expect(option(notification, "--subtitle")).toBeUndefined();
 			await harness.dispose();
 		}
 
@@ -377,7 +418,7 @@ describe("semantic notifications", () => {
 
 describe("GUI regression", () => {
 	test("retains exact GUI status and notify routing when the TUI socket is absent", async () => {
-		const harness = lifecycleHarness({ PATH: process.env.PATH, CMUX_WORKSPACE_ID: "workspace-gui", CMUX_SURFACE_ID: "surface-gui" });
+		const harness = lifecycleHarness({ PATH: process.env.PATH, HOSTNAME: "zacbook", CMUX_WORKSPACE_ID: "workspace-gui", CMUX_SURFACE_ID: "surface-gui" });
 		await harness.emit("session_start");
 		await harness.emit("before_agent_start", { prompt: "GUI prompt" });
 		await harness.emit("tool_execution_start", { toolCallId: "ask-gui", toolName: "ask" });
@@ -386,6 +427,7 @@ describe("GUI regression", () => {
 		const notification = guiCalls(harness, "notify").at(-1)!.argv;
 		expect(notification).toContain("workspace-gui");
 		expect(notification).toContain("surface-gui");
+		expect(option(notification, "--subtitle")).toBe("Waiting · zacbook · GUI");
 		expect(tuiCalls(harness, "report-agent")).toEqual([]);
 		await harness.dispose();
 	});

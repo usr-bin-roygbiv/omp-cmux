@@ -1,3 +1,4 @@
+import { hostname as systemHostname } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
 import { exactTargetArgs, parseCmuxJson, runCmux } from "./cmux.ts";
@@ -5,7 +6,6 @@ import {
 	LifecycleStateMachine,
 	type LifecycleAction,
 	type LifecycleEffect,
-	type LifecycleSnapshot,
 	type LifecycleStatus,
 	type SubagentSnapshot,
 	type TodoPhaseSnapshot,
@@ -23,7 +23,7 @@ interface EventBusLike {
 }
 
 interface ExtensionApiLike {
-	on(event: string, handler: (event: any, ctx: ExtensionContext) => void | Promise<void>): void;
+	on(event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown | Promise<unknown>): void;
 	events?: EventBusLike;
 	appendEntry?(customType: string, data?: unknown): void;
 }
@@ -40,6 +40,8 @@ interface Settlement {
 
 type NotificationKind = "input" | "approval" | "plan" | "completion" | "blocked" | "error";
 type TuiAgentState = "working" | "blocked" | "idle" | "done" | "error" | "unknown";
+type CmuxBackend = "tui" | "gui";
+const RUNTIME_ENVIRONMENT_OPEN = "<runtime-environment>";
 
 const REMOTE_MESSAGES: Record<NotificationKind, string> = {
 	input: "OMP is waiting for your response",
@@ -78,6 +80,30 @@ function boolean(value: unknown): boolean | undefined {
 
 function number(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+function machineName(env: NodeJS.ProcessEnv, resolveHostname: () => string): string {
+	let candidate = text(env.PI_MACHINE_NAME) ?? text(env.HOSTNAME);
+	if (!candidate) {
+		try { candidate = text(resolveHostname()); } catch { candidate = undefined; }
+	}
+	const shortName = (candidate ?? "unknown").split(".", 1)[0] ?? "unknown";
+	return shortName.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
+}
+
+function runtimeSystemPrompt(event: unknown, ctx: ExtensionContext, backend: CmuxBackend, machine: string): { systemPrompt: string[] } {
+	const configuredPrompt = record(event)?.systemPrompt;
+	const parts = Array.isArray(configuredPrompt)
+		? configuredPrompt.filter((part): part is string => typeof part === "string" && !part.startsWith(RUNTIME_ENVIRONMENT_OPEN))
+		: [];
+	const interfaceLabel = ctx.hasUI === true
+		? `cmux ${backend.toUpperCase()}`
+		: `headless agent under cmux ${backend.toUpperCase()}`;
+	return {
+		systemPrompt: [
+			...parts,
+			`${RUNTIME_ENVIRONMENT_OPEN}\nMachine: ${machine}\nOMP interface: ${interfaceLabel}\n</runtime-environment>`,
+		],
+	};
 }
 
 function tuiSurfaceIds(output: string): string[] {
@@ -285,6 +311,7 @@ export function registerCmuxLifecycle(
 		now?: () => number;
 		pid?: number;
 		ppid?: number;
+		hostname?: () => string;
 	} = {},
 ): () => Promise<void> {
 	const looseApi = api as unknown as ExtensionApiLike;
@@ -300,7 +327,8 @@ export function registerCmuxLifecycle(
 	const tuiRequested = Boolean(text(targetEnv.CMUX_TUI_SOCKET));
 	const rawTuiSurface = text(targetEnv.CMUX_TUI_SURFACE_ID);
 	let tuiSurface = rawTuiSurface && /^\d+$/.test(rawTuiSurface) ? rawTuiSurface : undefined;
-	const backend: "tui" | "gui" = tuiRequested ? "tui" : "gui";
+	const backend: CmuxBackend = tuiRequested ? "tui" : "gui";
+	const runtimeMachine = machineName(targetEnv, options.hostname ?? systemHostname);
 	let workspaceArgs: string[] | undefined;
 	let surfaceArgs: string[] | undefined;
 	if (backend === "gui") {
@@ -466,11 +494,13 @@ export function registerCmuxLifecycle(
 			return;
 		}
 		const presentation = notificationPresentation(kind, body);
+		const contextLabel = `${runtimeMachine} · ${backend === "tui" ? "cmux TUI" : "GUI"}`;
+		const contextualBody = `${presentation.body}\n\nSession: ${contextLabel}`;
 		if (backend === "tui" && tuiSurface) {
-			enqueue(["notify", "--title", presentation.title, "--subtitle", presentation.subtitle, "--body", presentation.body, "--level", presentation.level, "--surface", tuiSurface], tuiBinary);
+			enqueue(["notify", "--title", presentation.title, "--body", contextualBody, "--level", presentation.level, "--surface", tuiSurface], tuiBinary);
 			return;
 		}
-		if (surfaceArgs) enqueue(["notify", "--title", presentation.title, "--subtitle", presentation.subtitle, "--body", presentation.body, ...surfaceArgs]);
+		if (surfaceArgs) enqueue(["notify", "--title", presentation.title, "--subtitle", `${presentation.subtitle} · ${contextLabel}`, "--body", contextualBody, ...surfaceArgs]);
 	};
 
 	const on = (event: string, handler: (event: any, ctx: ExtensionContext) => void | Promise<void>): void => {
@@ -493,13 +523,17 @@ export function registerCmuxLifecycle(
 	on("session_start", sessionStart);
 	on("session_switch", sessionStart);
 	on("session_branch", sessionStart);
-	on("before_agent_start", async (event, ctx) => {
-		if (!rootActive) await sessionStart({ type: "session_start" }, ctx);
-		else if (backend === "tui" && !tuiSurface) await discoverTuiSurface();
-		startTelemetry(ctx);
-		const sessionId = contextSessionId(ctx);
-		if (sessionId) promptGenerationBySession.set(sessionId, (promptGenerationBySession.get(sessionId) ?? 0) + 1);
-		dispatch({ type: "agent-start" });
+	looseApi.on("before_agent_start", async (event, ctx) => {
+		lastContext = ctx;
+		if (ctx.hasUI === true) {
+			if (!rootActive) await sessionStart({ type: "session_start" }, ctx);
+			else if (backend === "tui" && !tuiSurface) await discoverTuiSurface();
+			startTelemetry(ctx);
+			const sessionId = contextSessionId(ctx);
+			if (sessionId) promptGenerationBySession.set(sessionId, (promptGenerationBySession.get(sessionId) ?? 0) + 1);
+			dispatch({ type: "agent-start" });
+		}
+		return runtimeSystemPrompt(event, ctx, backend, runtimeMachine);
 	});
 	on("agent_start", () => dispatch({ type: "turn-start" }));
 	on("turn_start", () => dispatch({ type: "turn-start" }));
