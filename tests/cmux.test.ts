@@ -124,6 +124,50 @@ describe("safe cmux process execution", () => {
 		});
 	});
 
+	test("prefers the native GUI executable over a stale TUI override in a Darwin GUI session", async () => {
+		const seen = observation();
+		const result = await runCmux(["capabilities"], {
+			env: {
+				CMUX_OMP_BINARY: "/tmp/npm/cmux-tui",
+				CMUX_WORKSPACE_ID: "workspace-gui",
+				CMUX_SURFACE_ID: "surface-gui",
+			},
+			platform: "darwin",
+			spawn: fakeSpawner(seen, { stdout: "{}" }),
+		});
+
+		expect(result.ok).toBe(true);
+		expect(seen.file).toBe("/Applications/cmux.app/Contents/Resources/bin/cmux");
+	});
+
+	test("preserves the selected TUI executable when a TUI socket is present", async () => {
+		const seen = observation();
+		const result = await runCmux(["capabilities"], {
+			env: {
+				CMUX_OMP_BINARY: "cmux-tui-test",
+				CMUX_WORKSPACE_ID: "workspace-gui",
+				CMUX_SURFACE_ID: "surface-gui",
+				CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock",
+			},
+			platform: "darwin",
+			spawn: fakeSpawner(seen, { stdout: "{}" }),
+		});
+
+		expect(result.ok).toBe(true);
+		expect(seen.file).toBe("cmux-tui-test");
+	});
+
+	test("does not force the GUI executable when the injected GUI identity is incomplete", async () => {
+		const seen = observation();
+		await runCmux(["capabilities"], {
+			env: { CMUX_OMP_BINARY: "configured-cmux", CMUX_WORKSPACE_ID: "workspace-only" },
+			platform: "darwin",
+			spawn: fakeSpawner(seen, { stdout: "{}" }),
+		});
+
+		expect(seen.file).toBe("configured-cmux");
+	});
+
 	test("bounds stdout and stderr independently and reports truncation", async () => {
 		const seen = observation();
 		const result = await runCmux(["capabilities"], {

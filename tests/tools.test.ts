@@ -15,6 +15,8 @@ import {
 
 type ToolDefinition = {
 	name: string;
+	description: string;
+	parameters: unknown;
 	execute: (id: string, params: Record<string, unknown>, signal?: AbortSignal) => Promise<{
 		content: Array<{ type: string; text: string }>;
 		details: Record<string, unknown>;
@@ -38,9 +40,10 @@ function commandResult(overrides: Partial<CmuxCommandResult> = {}): CmuxCommandR
 	};
 }
 
-function toolHarness(result: CmuxCommandResult = commandResult()) {
+function toolHarness(result: CmuxCommandResult | CmuxCommandResult[] = commandResult()) {
 	const tools = new Map<string, ToolDefinition>();
 	const calls: RunCall[] = [];
+	let resultIndex = 0;
 	const api = {
 		registerTool(definition: ToolDefinition) {
 			tools.set(definition.name, definition);
@@ -48,7 +51,11 @@ function toolHarness(result: CmuxCommandResult = commandResult()) {
 	};
 	const run = async (argv: readonly string[], options: CmuxRunOptions = {}) => {
 		calls.push({ argv: [...argv], options });
-		return result;
+		if (!Array.isArray(result)) return result;
+		const selected = result[Math.min(resultIndex, result.length - 1)];
+		resultIndex += 1;
+		if (!selected) throw new Error("tool harness requires at least one command result");
+		return selected;
 	};
 	registerCmuxTools(api as never, { run });
 	return { tools, calls };
@@ -173,6 +180,24 @@ describe("cmux coverage escape hatches", () => {
 		expect(result.content[0]!.text).toContain("permission denied");
 		expect(result.content[0]!.text).toContain("output truncated");
 	});
+
+	test("documents native GUI syntax and supported browser recovery paths", () => {
+		const { tools } = toolHarness();
+		const cliDescription = tools.get("cmux_cli")?.description ?? "";
+		const browserDescription = tools.get("cmux_browser")?.description ?? "";
+		const surfaceSchema = JSON.stringify(CmuxSurfaceSchema);
+
+		expect(cliDescription).toContain("read-screen");
+		expect(cliDescription).toContain("close-surface");
+		expect(cliDescription).toContain("positional");
+		expect(cliDescription).toContain("file://");
+		expect(browserDescription).toContain("snapshot");
+		expect(browserDescription).toContain(":has-text");
+		expect(browserDescription).toContain("network");
+		expect(browserDescription).toContain("input_mouse");
+		expect(surfaceSchema).toContain("CTRL_B");
+		expect(surfaceSchema).toContain("C-b");
+	});
 });
 
 describe("typed cmux argv translation", () => {
@@ -238,6 +263,98 @@ describe("typed cmux argv translation", () => {
 		expect(harness.calls[1]?.argv.slice(-4)).toEqual(["--", "program", "argument with spaces", "$(still-not-run)"]);
 	});
 
+	test("normalizes audited terminal key aliases to native positional key names", async () => {
+		const harness = toolHarness();
+		for (const [key, expected] of [
+			["CTRL_B", "ctrl+b"],
+			["C-b", "ctrl+b"],
+			["CTRL_C", "ctrl+c"],
+			["ESC", "escape"],
+			["ENTER", "enter"],
+			["LEFT", "left"],
+		] as const) {
+			await execute(harness, "cmux_surface", {
+				action: "send_key",
+				workspace_id: "workspace-1",
+				surface_id: "surface-1",
+				key,
+			});
+			expect(harness.calls.at(-1)?.argv.slice(-2)).toEqual(["--", expected]);
+		}
+	});
+
+	test("retries only the exact transient terminal-read startup failure", async () => {
+		const transient = commandResult({
+			ok: false,
+			exitCode: 1,
+			stderr: "Error: internal_error: Failed to read terminal text",
+			error: { code: "EXIT_ERROR", message: "cmux exited with code 1" },
+		});
+		const success = commandResult({ stdout: "terminal ready" });
+		const harness = toolHarness([transient, success]);
+		const result = await execute(harness, "cmux_surface", {
+			action: "read",
+			workspace_id: "workspace-1",
+			surface_id: "surface-1",
+		});
+
+		expect(harness.calls).toHaveLength(2);
+		expect(result).toMatchObject({ isError: false, content: [{ text: "terminal ready" }] });
+	});
+
+	test("keeps the bounded retry window open through four transient startup failures", async () => {
+		const transient = commandResult({
+			ok: false,
+			exitCode: 1,
+			stderr: "Error: internal_error: Failed to read terminal text",
+			error: { code: "EXIT_ERROR", message: "cmux exited with code 1" },
+		});
+		const success = commandResult({ stdout: "terminal eventually ready" });
+		const harness = toolHarness([transient, transient, transient, transient, success]);
+		const result = await execute(harness, "cmux_surface", {
+			action: "read",
+			workspace_id: "workspace-1",
+			surface_id: "surface-1",
+		});
+
+		expect(harness.calls).toHaveLength(5);
+		expect(result).toMatchObject({ isError: false, content: [{ text: "terminal eventually ready" }] });
+	});
+
+	test("does not retry unrelated terminal-read failures", async () => {
+		const denied = commandResult({
+			ok: false,
+			exitCode: 1,
+			stderr: "Error: permission denied",
+			error: { code: "EXIT_ERROR", message: "cmux exited with code 1" },
+		});
+		const harness = toolHarness([denied, commandResult({ stdout: "must not run" })]);
+		const result = await execute(harness, "cmux_surface", {
+			action: "read",
+			workspace_id: "workspace-1",
+			surface_id: "surface-1",
+		});
+
+		expect(harness.calls).toHaveLength(1);
+		expect(result.isError).toBe(true);
+	});
+
+	test("reports the requested closed target instead of cmux's newly selected neighbor", async () => {
+		const harness = toolHarness(commandResult({ stdout: "OK surface:neighbor workspace:6" }));
+		const result = await execute(harness, "cmux_surface", {
+			action: "close",
+			workspace_id: "workspace-6",
+			surface_id: "surface-requested",
+		});
+
+		expect(result).toMatchObject({
+			isError: false,
+			content: [{ type: "text", text: "Closed surface surface-requested in workspace workspace-6." }],
+			details: { target: { workspaceId: "workspace-6", surfaceId: "surface-requested" } },
+		});
+		expect(result.details.result).toMatchObject({ stdout: "OK surface:neighbor workspace:6" });
+	});
+
 	test("browser surface automation retains nested argv and appends exact routing", async () => {
 		const harness = toolHarness();
 		await execute(harness, "cmux_browser", {
@@ -249,13 +366,30 @@ describe("typed cmux argv translation", () => {
 		expect(harness.calls[0]?.argv).toEqual([
 			"--json",
 			"browser",
+			"--surface",
+			"surface-browser",
 			"fill",
 			"#search",
 			"two words",
-			"--workspace",
-			"workspace-browser",
+		]);
+	});
+
+	test("routes targeted browser actions with the native leading surface flag and no unsupported workspace flag", async () => {
+		const harness = toolHarness();
+		await execute(harness, "cmux_browser", {
+			action: "navigate",
+			arguments: ["data:text/html,<button>ready</button>"],
+			workspace_id: "workspace-browser",
+			surface_id: "surface-browser",
+		});
+
+		expect(harness.calls[0]?.argv).toEqual([
+			"--json",
+			"browser",
 			"--surface",
 			"surface-browser",
+			"navigate",
+			"data:text/html,<button>ready</button>",
 		]);
 	});
 

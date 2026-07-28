@@ -11,7 +11,7 @@ An [Oh My Pi (OMP)](https://omp.sh) marketplace plugin that exposes cmux through
   - GUI cmux supplies `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`.
   - cmux TUI supplies `CMUX_TUI_SOCKET`; a numeric `CMUX_TUI_SURFACE_ID` remains the preferred exact target when available. With cmux TUI 0.9.6, the plugin can recover an omitted surface ID only when exactly one registered surface process is the current OMP process or its direct parent.
 
-Lifecycle mutations never fall back to focused state. The plugin selects cmux TUI whenever `CMUX_TUI_SOCKET` is present and otherwise retains GUI routing. Missing GUI IDs and missing, invalid, stale, or ambiguous TUI process ownership fail closed.
+Lifecycle mutations never fall back to focused state. The plugin selects cmux TUI whenever `CMUX_TUI_SOCKET` is present. On Darwin, complete GUI workspace and surface identities force `/Applications/cmux.app/Contents/Resources/bin/cmux`, even when the process inherited a stale `CMUX_OMP_BINARY` pointing at npm `cmux-tui`. Missing GUI IDs and missing, invalid, stale, or ambiguous TUI process ownership fail closed.
 
 ## Install
 
@@ -47,6 +47,15 @@ Three escape hatches preserve access to the complete, evolving cmux API:
 
 Each tool returns readable content plus structured details. Failures are reported as tool errors, cancellation stops the child process, and captured output is bounded.
 
+Typed operations encode the native GUI contracts that are easy to misapply through the raw CLI:
+
+- `cmux_surface read` retries only the exact transient `Failed to read terminal text` startup race, with a bounded delay window.
+- `cmux_surface send_key` normalizes common aliases such as `CTRL_B`, `C-b`, `CTRL_C`, `ESC`, `ENTER`, and `LEFT` to native positional key names.
+- Successful typed closes report the requested workspace and surface rather than cmux's newly selected neighboring surface.
+- Targeted browser actions validate both exact identities but pass the native leading `--surface` flag; use `snapshot` and a returned ref or standard CSS. Playwright `:has-text` selectors and WKWebView `network`/`input_mouse` actions are unsupported.
+
+Prefer typed tools. For unavoidable GUI `cmux_cli` calls, use top-level `read-screen`, `close-surface`, and `list-panels`, plus positional `send-key KEY`. Do not invent `surface read`, `surface close`, `list-surfaces`, `--key`, or a command string without an argv array. Native `open` expects a local path rather than a `file://` URL; use browser navigation for URLs. TUI syntax is separate and requires its socket.
+
 ## Lifecycle synchronization
 
 GUI cmux status follows OMP through `idle`, `working`, `thinking`, `tool`, `needs-input`, `retrying`, `compacting`, `waiting`, `done`, `error`, and `stopped`. Tool status includes the active tool name. Ask gates publish `Needs input`, flash the originating surface, and only then send the decision notification; resolving the matching Ask restores the derived lifecycle status. Todo results mirror phase and item progress, while active task subagents appear by agent name and activity.
@@ -60,9 +69,9 @@ Native backend notifications are emitted for:
 3. a successful `xd://propose` plan submission; and
 4. the final `session_stop`, classified as completion, input required, blocked, or error.
 
-Both native paths receive the same semantic subtitle: `Waiting`, `Permission`, `Plan Ready`, `Completed`, `Blocked`, or `Error`. cmux TUI subtitle support requires protocol 11.
+GUI notifications use the semantic subtitle plus the machine and `GUI` identity, so concurrent sessions are distinguishable. cmux TUI `0.9.6` / protocol 10 does not accept `--subtitle`; the plugin omits that unsupported flag and appends `Session: <machine> · cmux TUI` to the body instead.
 
-Each semantic event is deduplicated by its stable session/tool-call or session/turn identity. Aborted turns and stops already owned by another stop hook are suppressed. Root/UI gating prevents subagents and headless sessions from producing lifecycle effects. A root interactive session inside remote tmux without a cmux surface retains the session-entry notification fallback. The entrypoint sets `CMUX_OMP_HOOKS_DISABLED=1` before registration to prevent duplicate legacy hooks.
+Each `before_agent_start` result appends a compact `<runtime-environment>` system-prompt block with the current machine and `cmux GUI`, `cmux TUI`, or `headless agent under ...` interface. The block is replaced rather than duplicated on later turns. Lifecycle effects remain root/UI-only: subagents and headless sessions receive environment awareness without producing statuses or notifications. Each semantic event is deduplicated by its stable session/tool-call or session/turn identity. Aborted turns and stops already owned by another stop hook are suppressed. A root interactive session inside remote tmux without a cmux surface retains the session-entry notification fallback. The entrypoint sets `CMUX_OMP_HOOKS_DISABLED=1` before registration to prevent duplicate legacy hooks.
 
 Package loading may finish after OMP has already emitted `session_start`, so the first `before_agent_start` event also activates and resets lifecycle state. Final status is settled authoritatively from `session_stop`; completion, input, blocked, error, and aborted outcomes therefore cannot leave cmux stuck on `Thinking` when `agent_end` is missing or delayed.
 
@@ -72,7 +81,7 @@ The manifest exposes these non-secret environment overrides:
 
 | Variable | Default | Purpose |
 | --- | ---: | --- |
-| `CMUX_OMP_BINARY` | `cmux` | Executable name or path |
+| `CMUX_OMP_BINARY` | `cmux` | Executable name or path outside a complete Darwin GUI session; complete Darwin GUI identities select the native app CLI |
 | `CMUX_OMP_TUI_BINARY` | `cmux-tui` | cmux TUI executable name or path |
 | `CMUX_OMP_TIMEOUT_MS` | `15000` | Child-process timeout in milliseconds |
 | `CMUX_OMP_MAX_OUTPUT_BYTES` | `1048576` | Maximum captured bytes for each output stream |

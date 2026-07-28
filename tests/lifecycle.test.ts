@@ -69,6 +69,7 @@ function harness() {
 		run,
 		env: {
 			PATH: process.env.PATH,
+			HOSTNAME: "test-host",
 			CMUX_WORKSPACE_ID: "workspace-test",
 			CMUX_SURFACE_ID: "surface-test",
 		},
@@ -249,7 +250,7 @@ describe("OMP lifecycle adapter", () => {
 			}
 			expect(sent).toHaveLength(1);
 			expect(sent[0]).toContain(scenario.title);
-			expect(sent[0]).toContain(scenario.subtitle);
+			expect(sent[0]).toContain(`${scenario.subtitle} · test-host · GUI`);
 			const statusIndex = lastCommandIndex(testHarness.calls, call => call.argv[0] === "set-status" && call.argv[1] === "omp_plugin");
 			const notificationIndex = lastCommandIndex(testHarness.calls, call => call.argv[0] === "notify");
 			expect(statusIndex).toBeLessThan(notificationIndex);
