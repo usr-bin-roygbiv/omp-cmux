@@ -85,10 +85,13 @@ liveTest(
 				result: { details: { phases: [{ name: "Probe", tasks: [{ content: "Start", status: "completed" }, { content: "Finish", status: "in_progress" }] }] } },
 			});
 			emitBus("task:subagent:progress", { agent: "LiveWorker", progress: { id: "live-agent", status: "running", currentTool: "read" } });
-			const working = await waitFor(agent => agent.state === "working" && agent.session === "omp-cmux-live-probe");
+			const working = await waitFor(agent => agent.state === "working" && agent.session === "omp-cmux-live-probe" && agent.tasks_completed === 1 && agent.tasks_total === 2 && agent.agents_active === 2);
 			expect(working.surface).toBe(Number(surface));
 			expect(working.source).toBe("socket");
 			expect(typeof working.updated_at_ms).toBe("number");
+			expect(working.root_session).toBe(true);
+			expect(typeof working.started_at_ms).toBe("number");
+			expect(typeof working.jobs_running).toBe("number");
 			await emit("tool_execution_start", { toolCallId: "ask-live", toolName: "ask" });
 			await emit("session_stop", {
 				turn_id: 1,

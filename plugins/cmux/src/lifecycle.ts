@@ -347,6 +347,7 @@ export function registerCmuxLifecycle(
 	let commandTail = Promise.resolve();
 	let tuiSurfaceDiscovery: Promise<string | undefined> | undefined;
 	const tuiBinary = targetEnv.CMUX_OMP_TUI_BINARY?.trim() || "cmux-tui";
+	let structuredTuiReportsSupported: boolean | undefined;
 
 	const discoverTuiSurface = async (): Promise<string | undefined> => {
 		if (tuiSurface || backend !== "tui") return tuiSurface;
@@ -392,6 +393,23 @@ export function registerCmuxLifecycle(
 		}).catch(() => undefined);
 	};
 
+	const enqueueTuiReport = (richArgs: string[], fallbackArgs: string[]): void => {
+		commandTail = commandTail.then(async () => {
+			const runReport = (args: string[]) => runner(args, { env: targetEnv, binary: tuiBinary });
+			if (structuredTuiReportsSupported === false) {
+				await runReport(fallbackArgs);
+				return;
+			}
+			const richResult = await runReport(richArgs);
+			if (richResult.ok) {
+				structuredTuiReportsSupported = true;
+				return;
+			}
+			structuredTuiReportsSupported = false;
+			await runReport(fallbackArgs);
+		}).catch(() => undefined);
+	};
+
 	const remember = (key: string): boolean => {
 		if (delivered.has(key)) return false;
 		delivered.add(key);
@@ -416,22 +434,22 @@ export function registerCmuxLifecycle(
 		const todo = snapshot.todo;
 		const todoDetail = todo ? [todo.currentPhase, todo.currentItem].filter(Boolean).join(": ") : "";
 		const details = [snapshot.statusText, todoDetail, ...agents.map(agentActivity)].filter(Boolean);
-		const args = [
+		const fallbackArgs = [
 			"report-agent", "--surface", tuiSurface,
 			"--state", stateOverride ?? tuiState(snapshot.status),
 			"--source", "hook",
 		];
 		const sessionId = contextSessionId(lastContext);
-		if (sessionId) args.push("--session", sessionId);
-		args.push("--label", "OMP", "--detail", details.join(" · "));
-		if (startedAtMs !== undefined) args.push("--started-at-ms", String(startedAtMs));
-		if (todo) args.push("--tasks-completed", String(todo.completed), "--tasks-total", String(todo.total));
-		args.push("--jobs-running", String(AsyncJobManager.instance()?.getRunningJobs().length ?? 0));
-		args.push("--agents-active", String(1 + agents.length));
-		const signature = JSON.stringify(args);
+		if (sessionId) fallbackArgs.push("--session", sessionId);
+		const richArgs = [...fallbackArgs, "--root-session", "--label", "OMP", "--detail", details.join(" · ")];
+		if (startedAtMs !== undefined) richArgs.push("--started-at-ms", String(startedAtMs));
+		if (todo) richArgs.push("--tasks-completed", String(todo.completed), "--tasks-total", String(todo.total));
+		richArgs.push("--jobs-running", String(AsyncJobManager.instance()?.getRunningJobs().length ?? 0));
+		richArgs.push("--agents-active", String(1 + agents.length));
+		const signature = JSON.stringify(richArgs);
 		if (signature === lastTuiReport) return;
 		lastTuiReport = signature;
-		enqueue(args, tuiBinary);
+		enqueueTuiReport(richArgs, fallbackArgs);
 	};
 
 	const startTelemetry = (ctx: ExtensionContext): void => {

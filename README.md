@@ -6,7 +6,7 @@ An [Oh My Pi (OMP)](https://omp.sh) marketplace plugin that exposes cmux through
 
 - OMP 17.1.3 or newer for the public Git installation flow
 - Bun (for development and tests)
-- cmux GUI or `cmux-tui` protocol 12 or newer installed and running, with its CLI available on `PATH`
+- cmux GUI or `cmux-tui` `0.9.6` or newer installed and running, with its CLI available on `PATH`; structured per-workspace root-status counts require protocol 12
 - OMP launched inside the target backend:
   - GUI cmux supplies `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`.
   - cmux TUI supplies `CMUX_TUI_SOCKET`; a numeric `CMUX_TUI_SURFACE_ID` remains the preferred exact target. When the surface ID is omitted, the plugin recovers it only when exactly one registered surface process is the current OMP process or its direct parent.
@@ -64,7 +64,7 @@ Prefer typed tools. For unavoidable GUI `cmux_cli` calls, use top-level `read-sc
 
 GUI cmux status follows OMP through `idle`, `working`, `thinking`, `tool`, `needs-input`, `retrying`, `compacting`, `waiting`, `done`, `error`, and `stopped`. Tool status includes the active tool name. Ask gates publish `Needs input`, flash the originating surface, and only then send the decision notification; resolving the matching Ask restores the derived lifecycle status. Todo results mirror phase and item progress, while active task subagents appear by agent name and activity.
 
-In cmux TUI, lifecycle state is sent through the protocol 12 `cmux-tui report-agent` schema to the numeric injected surface. The plugin reports exactly one root record labeled `OMP`, including session state, lifecycle detail, elapsed start time, todo progress, running jobs, and the active-agent total. Subagent activity is folded into that root record's detail and `agents_active` field; it never creates another agent record or native notification.
+In cmux TUI, lifecycle state is sent to the numeric injected surface with exactly one authoritative OMP record. On protocol 12, the plugin sets the structured `root_session` flag and includes lifecycle detail, elapsed start time, todo progress, running jobs, and the active-agent total; subagent activity is folded into that root record and never creates another record or notification. If the richer report is rejected, the plugin caches a protocol-10-compatible fallback for that process using only surface, state, source, and optional session, so the fleet can adopt the plugin before upgrading cmux TUI.
 
 Native backend notifications are emitted for:
 
@@ -73,7 +73,7 @@ Native backend notifications are emitted for:
 3. a successful `xd://propose` plan submission; and
 4. the final `session_stop`, classified as completion, input required, blocked, or error.
 
-Both native paths receive the same semantic subtitle: `Waiting`, `Permission`, `Plan Ready`, `Completed`, `Blocked`, or `Error`. cmux TUI subtitle and agent-telemetry support require protocol 12.
+Both native paths receive the same semantic subtitle: `Waiting`, `Permission`, `Plan Ready`, `Completed`, `Blocked`, or `Error`. Structured per-workspace agent counts and rich agent telemetry require cmux TUI protocol 12.
 
 Each `before_agent_start` result appends a compact `<runtime-environment>` system-prompt block with the current machine and `cmux GUI`, `cmux TUI`, or `headless agent under ...` interface. The block is replaced rather than duplicated on later turns. Lifecycle effects remain root/UI-only: subagents and headless sessions receive environment awareness without producing statuses or notifications. Each semantic event is deduplicated by its stable session/tool-call or session/turn identity. Aborted turns and stops already owned by another stop hook are suppressed. A root interactive session inside remote tmux without a cmux surface retains the session-entry notification fallback. The entrypoint sets `CMUX_OMP_HOOKS_DISABLED=1` before registration to prevent duplicate legacy hooks.
 

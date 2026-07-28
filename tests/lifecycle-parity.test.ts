@@ -181,6 +181,7 @@ describe("TUI lifecycle backend", () => {
 		const report = reports.at(-1)!.argv;
 		expect(report.slice(0, 5)).toEqual(["report-agent", "--surface", "17", "--state", "working"]);
 		expect(option(report, "--source")).toBe("hook");
+		expect(report).toContain("--root-session");
 		expect(option(report, "--session")).toBe("session-42");
 		expect(option(report, "--started-at-ms")).toBe("1700000000123");
 		expect(option(report, "--tasks-completed")).toBe("1");
@@ -194,6 +195,31 @@ describe("TUI lifecycle backend", () => {
 
 		releaseJob();
 		await manager.dispose();
+		await harness.dispose();
+	});
+
+	test("falls back to the protocol 10 root report schema when structured root telemetry is rejected", async () => {
+		const harness = lifecycleHarness(
+			{ PATH: process.env.PATH, CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock", CMUX_TUI_SURFACE_ID: "20" },
+			{
+				runResult(argv) {
+					if (argv[0] === "report-agent" && argv.includes("--root-session")) {
+						return { ...okResult(), ok: false, exitCode: 2, stderr: "unknown flag --root-session" };
+					}
+					return okResult();
+				},
+			},
+		);
+
+		await harness.emit("session_start");
+		await flush(harness);
+
+		const reports = tuiCalls(harness, "report-agent").map(call => call.argv);
+		expect(reports).toHaveLength(2);
+		expect(reports[0]).toContain("--root-session");
+		expect(reports[1]).toEqual([
+			"report-agent", "--surface", "20", "--state", "idle", "--source", "hook", "--session", "session-42",
+		]);
 		await harness.dispose();
 	});
 
