@@ -1,5 +1,4 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
 
 import { exactTargetArgs, runCmux } from "./cmux.ts";
 import {
@@ -246,9 +245,6 @@ function tuiState(status: LifecycleStatus): TuiAgentState {
 	}
 }
 
-function liveSubagents(snapshot: LifecycleSnapshot): SubagentSnapshot[] {
-	return snapshot.subagents.filter(agent => agent.status !== "completed" && agent.status !== "failed");
-}
 
 function notificationPresentation(kind: NotificationKind, body: string): { title: string; body: string; level: "info" | "warning" | "error"; subtitle: string } {
 	switch (kind) {
@@ -290,7 +286,6 @@ export function registerCmuxLifecycle(
 	let rootActive = false;
 	let disposed = false;
 	let telemetryTimer: Timer | undefined;
-	let startedAtMs: number | undefined;
 	let lastTuiReport: string | undefined;
 	let commandTail = Promise.resolve();
 
@@ -318,27 +313,15 @@ export function registerCmuxLifecycle(
 		telemetryTimer = undefined;
 	};
 
-	const reportTui = (stateOverride?: TuiAgentState, detailOverride?: string): void => {
+	const reportTui = (stateOverride?: TuiAgentState): void => {
 		if (!rootActive || backend !== "tui" || !tuiSurface) return;
-		const snapshot = machine.snapshot;
-		const agents = liveSubagents(snapshot);
-		const todo = snapshot.todo;
-		const todoDetail = todo ? [todo.currentPhase, todo.currentItem].filter(Boolean).join(": ") : "";
-		const details = detailOverride
-			? [detailOverride]
-			: [snapshot.statusText, todoDetail, ...agents.map(agentActivity)].filter(Boolean);
 		const args = [
 			"report-agent", "--surface", tuiSurface,
-			"--state", stateOverride ?? tuiState(snapshot.status),
+			"--state", stateOverride ?? tuiState(machine.snapshot.status),
 			"--source", "socket",
 		];
 		const sessionId = contextSessionId(lastContext);
 		if (sessionId) args.push("--session", sessionId);
-		args.push("--label", "OMP", "--detail", details.join(" · "));
-		if (startedAtMs !== undefined) args.push("--started-at-ms", String(startedAtMs));
-		if (todo) args.push("--tasks-completed", String(todo.completed), "--tasks-total", String(todo.total));
-		args.push("--jobs-running", String(AsyncJobManager.instance()?.getRunningJobs().length ?? 0));
-		args.push("--agents-active", String(1 + agents.length));
 		const signature = JSON.stringify(args);
 		if (signature === lastTuiReport) return;
 		lastTuiReport = signature;
@@ -436,7 +419,6 @@ export function registerCmuxLifecycle(
 
 	const sessionStart = (_event: unknown, ctx: ExtensionContext): void => {
 		rootActive = true;
-		startedAtMs = now();
 		promptGenerationBySession.clear();
 		lastTuiReport = undefined;
 		dispatch({ type: "session-start" });
@@ -520,8 +502,7 @@ export function registerCmuxLifecycle(
 		const settlement = classifyFinalSettlement(event.last_assistant_message ?? finalAssistantMessage(event.messages));
 		dispatch({ type: "session-stop", outcome: settlement.kind }, false);
 		const state: TuiAgentState = settlement.kind === "completion" ? "done" : settlement.kind === "error" ? "error" : settlement.kind === "input" || settlement.kind === "blocked" ? "blocked" : "unknown";
-		const finalDetail = settlement.text || (settlement.kind === "suppress" ? "Stopped" : notificationPresentation(settlement.kind, "").body);
-		reportTui(state, finalDetail);
+		reportTui(state);
 		if (!event.stop_hook_active && settlement.kind !== "suppress") {
 			const sessionId = contextSessionId(ctx, event.session_id);
 			if (sessionId) {

@@ -29,7 +29,7 @@ function okResult(): CmuxCommandResult {
 	};
 }
 
-function lifecycleHarness(env: NodeJS.ProcessEnv, options: { hasUI?: boolean; now?: number } = {}) {
+function lifecycleHarness(env: NodeJS.ProcessEnv, options: { hasUI?: boolean } = {}) {
 	const handlers = new Map<string, Handler[]>();
 	const busHandlers = new Map<string, Array<(payload: unknown) => void>>();
 	const calls: RunCall[] = [];
@@ -71,7 +71,7 @@ function lifecycleHarness(env: NodeJS.ProcessEnv, options: { hasUI?: boolean; no
 		calls.push({ argv: [...argv], options: runOptions });
 		return okResult();
 	};
-	const dispose = registerCmuxLifecycle(api as never, { env, run, now: () => options.now ?? 1_700_000_000_000 });
+	const dispose = registerCmuxLifecycle(api as never, { env, run });
 	return {
 		calls,
 		entries,
@@ -118,7 +118,7 @@ afterEach(() => {
 });
 
 describe("TUI lifecycle backend", () => {
-	test("routes numeric TUI reports with session time, todo, jobs, and root plus live-agent stats", async () => {
+	test("routes numeric TUI reports through the stable cmux-tui schema", async () => {
 		let releaseJob!: () => void;
 		const manager = new AsyncJobManager({ onJobComplete: () => undefined, retentionMs: 0 });
 		AsyncJobManager.setInstance(manager);
@@ -131,7 +131,6 @@ describe("TUI lifecycle backend", () => {
 
 		const harness = lifecycleHarness(
 			{ PATH: process.env.PATH, CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock", CMUX_TUI_SURFACE_ID: "17", CMUX_TUI_WORKSPACE_ID: "3" },
-			{ now: 1_700_000_000_123 },
 		);
 		await harness.emit("session_start");
 		await harness.emit("before_agent_start", { prompt: "Implement telemetry" });
@@ -154,16 +153,17 @@ describe("TUI lifecycle backend", () => {
 		const reports = tuiCalls(harness, "report-agent");
 		expect(reports.length).toBeGreaterThan(0);
 		const report = reports.at(-1)!.argv;
-		expect(report.slice(0, 5)).toEqual(["report-agent", "--surface", "17", "--state", "working"]);
-		expect(option(report, "--source")).toBe("socket");
-		expect(option(report, "--session")).toBe("session-42");
-		expect(option(report, "--started-at-ms")).toBe("1700000000123");
-		expect(option(report, "--tasks-completed")).toBe("1");
-		expect(option(report, "--tasks-total")).toBe("2");
-		expect(option(report, "--jobs-running")).toBe("1");
-		expect(option(report, "--agents-active")).toBe("2");
-		expect(option(report, "--detail")).toContain("Worker");
-		expect(option(report, "--detail")).toContain("Build: Verify");
+		expect(report).toEqual([
+			"report-agent",
+			"--surface",
+			"17",
+			"--state",
+			"working",
+			"--source",
+			"socket",
+			"--session",
+			"session-42",
+		]);
 		expect(guiCalls(harness, "set-status")).toEqual([]);
 		expect(harness.intervals).toHaveLength(1);
 

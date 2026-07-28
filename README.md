@@ -6,7 +6,7 @@ An [Oh My Pi (OMP)](https://omp.sh) marketplace plugin that exposes cmux through
 
 - OMP 17.1.3 or newer for the public Git installation flow
 - Bun (for development and tests)
-- cmux GUI or a protocol-11-or-newer `cmux-tui` installed and running, with its CLI available on `PATH`
+- cmux GUI or `cmux-tui` `0.9.6` or newer installed and running, with its CLI available on `PATH`
 - OMP launched inside the target backend:
   - GUI cmux supplies `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`.
   - cmux TUI supplies `CMUX_TUI_SOCKET`, a numeric `CMUX_TUI_SURFACE_ID`, and `CMUX_TUI_WORKSPACE_ID`.
@@ -51,7 +51,7 @@ Each tool returns readable content plus structured details. Failures are reporte
 
 GUI cmux status follows OMP through `idle`, `working`, `thinking`, `tool`, `needs-input`, `retrying`, `compacting`, `waiting`, `done`, `error`, and `stopped`. Tool status includes the active tool name. Ask gates publish `Needs input`, flash the originating surface, and only then send the decision notification; resolving the matching Ask restores the derived lifecycle status. Todo results mirror phase and item progress, while active task subagents appear by agent name and activity.
 
-In cmux TUI, the same lifecycle is sent through `cmux-tui report-agent` to the numeric injected surface. Reports include the session label and detail, start time, completed and total tasks, running async jobs, and the root agent plus live subagents. The plugin reads jobs only through OMP's public `AsyncJobManager` export. A single bounded polling timer refreshes job counts while a turn is active and is cleared at turn stop or session shutdown.
+In cmux TUI, lifecycle state is sent through the stable `cmux-tui report-agent` schema to the numeric injected surface. Each report contains only the cross-version fields accepted by npm `cmux` `0.9.6` / protocol 10: surface, state, source, and the optional OMP session ID. A single bounded timer refreshes the current lifecycle state and is cleared at turn stop or session shutdown; unsupported private/rich flags are never emitted.
 
 Native backend notifications are emitted for:
 
