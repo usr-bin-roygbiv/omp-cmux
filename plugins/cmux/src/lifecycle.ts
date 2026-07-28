@@ -1,6 +1,5 @@
 import { hostname as systemHostname } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
 
 import { exactTargetArgs, parseCmuxJson, runCmux } from "./cmux.ts";
 import {
@@ -27,6 +26,10 @@ interface ExtensionApiLike {
 	on(event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown | Promise<unknown>): void;
 	events?: EventBusLike;
 	appendEntry?(customType: string, data?: unknown): void;
+}
+
+interface AsyncJobSnapshotContext {
+	getAsyncJobSnapshot?(): { running: readonly unknown[] } | null;
 }
 
 interface StatusStyle {
@@ -444,7 +447,8 @@ export function registerCmuxLifecycle(
 		const richArgs = [...fallbackArgs, "--root-session", "--label", "OMP", "--detail", details.join(" · ")];
 		if (startedAtMs !== undefined) richArgs.push("--started-at-ms", String(startedAtMs));
 		if (todo) richArgs.push("--tasks-completed", String(todo.completed), "--tasks-total", String(todo.total));
-		richArgs.push("--jobs-running", String(AsyncJobManager.instance()?.getRunningJobs().length ?? 0));
+		const jobsRunning = (lastContext as (ExtensionContext & AsyncJobSnapshotContext) | undefined)?.getAsyncJobSnapshot?.()?.running.length ?? 0;
+		richArgs.push("--jobs-running", String(jobsRunning));
 		richArgs.push("--agents-active", String(1 + agents.length));
 		const signature = JSON.stringify(richArgs);
 		if (signature === lastTuiReport) return;

@@ -1,5 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
+import { describe, expect, test } from "bun:test";
 
 import type { CmuxCommandResult, CmuxRunOptions } from "../plugins/cmux/src/cmux.ts";
 import { registerCmuxLifecycle } from "../plugins/cmux/src/lifecycle.ts";
@@ -40,6 +39,7 @@ function okResult(stdout = ""): CmuxCommandResult {
 function lifecycleHarness(env: NodeJS.ProcessEnv, options: {
 	hasUI?: boolean;
 	now?: number;
+	jobsRunning?: number;
 	pid?: number;
 	ppid?: number;
 	hostname?: () => string;
@@ -55,6 +55,11 @@ function lifecycleHarness(env: NodeJS.ProcessEnv, options: {
 	const context = {
 		hasUI: options.hasUI ?? true,
 		hasPendingMessages: () => pending,
+		getAsyncJobSnapshot: () => ({
+			running: Array.from({ length: options.jobsRunning ?? 0 }, (_, index) => ({ id: `bg-${index + 1}` })),
+			recent: [],
+			delivery: { queued: 0, delivering: false, pendingJobIds: [] },
+		}),
 		sessionManager,
 		setInterval(callback: () => void) {
 			intervals.add(callback);
@@ -138,25 +143,13 @@ async function flush(harness: TickHarness) {
 	for (let index = 0; index < 8; index += 1) await Promise.resolve();
 }
 
-afterEach(() => {
-	AsyncJobManager.resetForTests();
-});
 
 describe("TUI lifecycle backend", () => {
-	test("routes numeric TUI reports with session time, todo, jobs, and root plus live-agent stats", async () => {
-		let releaseJob!: () => void;
-		const manager = new AsyncJobManager({ onJobComplete: () => undefined, retentionMs: 0 });
-		AsyncJobManager.setInstance(manager);
-		manager.register("bash", "background build", async () => {
-			await new Promise<void>(resolve => {
-				releaseJob = resolve;
-			});
-			return "done";
-		});
+	test("routes numeric TUI reports with session-scoped jobs, Todo, and root plus live-agent stats", async () => {
 
 		const harness = lifecycleHarness(
 			{ PATH: process.env.PATH, CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock", CMUX_TUI_SURFACE_ID: "17", CMUX_TUI_WORKSPACE_ID: "3" },
-			{ now: 1_700_000_000_123 },
+			{ now: 1_700_000_000_123, jobsRunning: 1 },
 		);
 		await harness.emit("session_start");
 		await harness.emit("before_agent_start", { prompt: "Implement telemetry" });
@@ -193,8 +186,6 @@ describe("TUI lifecycle backend", () => {
 		expect(guiCalls(harness, "set-status")).toEqual([]);
 		expect(harness.intervals).toHaveLength(1);
 
-		releaseJob();
-		await manager.dispose();
 		await harness.dispose();
 	});
 
@@ -282,6 +273,11 @@ describe("TUI lifecycle backend", () => {
 		const rootContext = {
 			hasUI: true,
 			hasPendingMessages: () => false,
+			getAsyncJobSnapshot: () => ({
+				running: [],
+				recent: [],
+				delivery: { queued: 0, delivering: false, pendingJobIds: [] },
+			}),
 			sessionManager: { getSessionId: () => "session-42" },
 			setInterval(callback: () => void) {
 				harness.intervals.add(callback);
