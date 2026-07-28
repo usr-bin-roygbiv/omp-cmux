@@ -145,6 +145,8 @@ The repository root is the same extension package used by direct Git installs. L
 
 This marketplace is distributed from source; it is not an npm release and has no generated artifacts. To publish a release, update the matching versions in the root package, plugin package, and marketplace catalog, run the checks above, then create and push the corresponding Git tag to the public repository. Consumers receive it with the marketplace update and plugin upgrade commands shown above.
 
+Maintainers who feed a private compatibility runner can configure a Git remote for it and run `scripts/sync-compatibility-mirror.sh <remote>`. The script fetches public `origin/main` and release tags, permits only a fast-forward of mirror `main`, pushes the branch and reachable annotated tags atomically, and refuses to overwrite divergence. Scheduled compatibility runs fetch public `main` before testing, so their locked and latest OMP lanes always exercise the current public source even between mirror synchronizations.
+
 ## License
 
 [MIT](LICENSE)

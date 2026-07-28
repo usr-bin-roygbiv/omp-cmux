@@ -227,6 +227,7 @@ describe("cluster update CI", () => {
 		const packageJson = JSON.parse(readFileSync(resolve(import.meta.dir, "../package.json"), "utf8")) as { devDependencies: Record<string, string> };
 		expect(packageJson.devDependencies["@oh-my-pi/pi-coding-agent"]).toBe("17.1.8");
 		for (const event of ["push", "pull_request", "manual", "cron"]) expect(pipeline).toContain(`- ${event}`);
+		expect(pipeline).toContain('if [ "$CI_PIPELINE_EVENT" = "cron" ]; then git fetch --force --tags https://github.com/usr-bin-roygbiv/omp-cmux.git main && git checkout --detach FETCH_HEAD; fi');
 		expect(pipeline).toContain("locked-omp-contract:");
 		expect(pipeline).toContain("latest-omp-contract:");
 		expect(pipeline).toContain("@oh-my-pi/pi-coding-agent@latest");
