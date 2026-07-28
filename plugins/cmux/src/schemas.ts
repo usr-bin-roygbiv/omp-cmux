@@ -89,7 +89,7 @@ export const CmuxSurfaceSchema = Type.Object(
 		surface_id: Type.Optional(Handle),
 		window_id: Type.Optional(Handle),
 		pane_id: Type.Optional(Handle),
-		type: Type.Optional(Type.Union([Type.Literal("terminal"), Type.Literal("browser"), Type.Literal("agent-session")])),
+		type: Type.Optional(Object.assign(Type.Union([Type.Literal("terminal"), Type.Literal("browser"), Type.Literal("agent-session")]), { description: "Use terminal or agent-session here. Browser creation is rejected; use cmux_browser open or new." })),
 		placement: Type.Optional(Type.Union([Type.Literal("workspace"), Type.Literal("dock")])),
 		direction: Type.Optional(Type.Union([
 			Type.Literal("left"),

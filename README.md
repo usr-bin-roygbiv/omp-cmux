@@ -50,6 +50,7 @@ Each tool returns readable content plus structured details. Failures are reporte
 Typed operations encode the native GUI contracts that are easy to misapply through the raw CLI:
 
 - `cmux_surface read` retries only the exact transient `Failed to read terminal text` startup race, with a bounded delay window.
+- Browser surfaces are created through `cmux_browser open` or `new`; `cmux_surface create` rejects `type: browser` because native `new-surface` can return a non-operable browser handle.
 - `cmux_surface send_key` normalizes common aliases such as `CTRL_B`, `C-b`, `CTRL_C`, `ESC`, `ENTER`, and `LEFT` to native positional key names.
 - Successful typed closes report the requested workspace and surface rather than cmux's newly selected neighboring surface.
 - Targeted browser actions validate both exact identities but pass the native leading `--surface` flag; use `snapshot` and a returned ref or standard CSS. Playwright `:has-text` selectors and WKWebView `network`/`input_mouse` actions are unsupported.

@@ -244,6 +244,20 @@ describe("typed cmux argv translation", () => {
 		]);
 	});
 
+	test("rejects browser creation through cmux_surface before invoking misleading native new-surface behavior", async () => {
+		const harness = toolHarness();
+		const result = await execute(harness, "cmux_surface", {
+			action: "create",
+			workspace_id: "workspace-1",
+			type: "browser",
+			url: "about:blank",
+		});
+
+		expect(harness.calls).toEqual([]);
+		expect(result).toMatchObject({ isError: true, details: { operation: "validation" } });
+		expect(result.content[0]?.text).toContain("cmux_browser open");
+	});
+
 	test("surface text and resume commands use an argv delimiter for user-controlled values", async () => {
 		const harness = toolHarness();
 		await execute(harness, "cmux_surface", {
