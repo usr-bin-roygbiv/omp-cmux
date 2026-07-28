@@ -229,6 +229,9 @@ function surfaceArgv(input: CmuxSurfaceInput): string[] {
 		case "list":
 			return ["--json", "list-panels", ...exactTargetArgs(target, "workspace")];
 		case "create": {
+			if (input.type === "browser") {
+				throw new TypeError("browser surfaces must be created with cmux_browser open or new");
+			}
 			const args = ["--json", "new-surface", ...exactTargetArgs(target, "workspace")];
 			appendOption(args, "--type", input.type);
 			appendOption(args, "--pane", input.pane_id);
@@ -480,7 +483,7 @@ export function registerCmuxTools(api: ExtensionAPI, options: { run?: Runner } =
 	registerTool(api, {
 		name: "cmux_surface",
 		label: "cmux Surface",
-		description: "Create, split, inspect, read, control, resume, or close cmux surfaces. Targeted actions require exact workspace and surface identities from parameters or cmux environment variables. Reads retry only the exact transient terminal startup error; close results name the requested target.",
+		description: "Create terminal/agent surfaces, split, inspect, read, control, resume, or close surfaces. Create browser surfaces with cmux_browser open or new; native new-surface can report a browser that is not operable. Targeted actions require exact identities. Reads retry only the exact transient terminal startup error; close results name the requested target.",
 		parameters: CmuxSurfaceSchema,
 		async execute(_id, params: CmuxSurfaceInput, signal) {
 			try { return await executeSurfaceCommand(params, signal, runner); }
