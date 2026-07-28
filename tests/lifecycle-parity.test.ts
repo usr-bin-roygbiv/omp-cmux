@@ -16,12 +16,12 @@ interface EntryCall {
 
 type Handler = (event: any, context: any) => void | Promise<void>;
 
-function okResult(): CmuxCommandResult {
+function okResult(stdout = ""): CmuxCommandResult {
 	return {
 		ok: true,
 		exitCode: 0,
 		signal: null,
-		stdout: "",
+		stdout,
 		stderr: "",
 		timedOut: false,
 		aborted: false,
@@ -29,7 +29,12 @@ function okResult(): CmuxCommandResult {
 	};
 }
 
-function lifecycleHarness(env: NodeJS.ProcessEnv, options: { hasUI?: boolean } = {}) {
+function lifecycleHarness(env: NodeJS.ProcessEnv, options: {
+	hasUI?: boolean;
+	pid?: number;
+	ppid?: number;
+	runResult?: (argv: readonly string[]) => CmuxCommandResult;
+} = {}) {
 	const handlers = new Map<string, Handler[]>();
 	const busHandlers = new Map<string, Array<(payload: unknown) => void>>();
 	const calls: RunCall[] = [];
@@ -69,9 +74,14 @@ function lifecycleHarness(env: NodeJS.ProcessEnv, options: { hasUI?: boolean } =
 	};
 	const run = async (argv: readonly string[], runOptions: CmuxRunOptions = {}) => {
 		calls.push({ argv: [...argv], options: runOptions });
-		return okResult();
+		return options.runResult?.(argv) ?? okResult();
 	};
-	const dispose = registerCmuxLifecycle(api as never, { env, run });
+	const dispose = registerCmuxLifecycle(api as never, {
+		env,
+		run,
+		...(options.pid === undefined ? {} : { pid: options.pid }),
+		...(options.ppid === undefined ? {} : { ppid: options.ppid }),
+	});
 	return {
 		calls,
 		entries,
@@ -169,6 +179,52 @@ describe("TUI lifecycle backend", () => {
 
 		releaseJob();
 		await manager.dispose();
+		await harness.dispose();
+	});
+
+	test("discovers an omitted TUI surface only from the current process owner", async () => {
+		const harness = lifecycleHarness(
+			{ PATH: process.env.PATH, CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock" },
+			{
+				pid: 4_101,
+				ppid: 4_100,
+				runResult(argv) {
+					if (argv[0] === "ids") {
+						return okResult(JSON.stringify({
+							ids: [
+								{ id: 17, kind: "surface", short_id: "00000h" },
+								{ id: 18, kind: "surface", short_id: "00000i" },
+							],
+						}));
+					}
+					if (argv[0] === "process-info" && option([...argv], "--surface") === "17") {
+						return okResult(JSON.stringify({ pid: 9_999 }));
+					}
+					if (argv[0] === "process-info" && option([...argv], "--surface") === "18") {
+						return okResult(JSON.stringify({ pid: 4_100 }));
+					}
+					return okResult();
+				},
+			},
+		);
+
+		await harness.emit("session_start");
+		await flush(harness);
+
+		expect(tuiCalls(harness, "ids")).toHaveLength(1);
+		expect(tuiCalls(harness, "process-info")).toHaveLength(2);
+		expect(tuiCalls(harness, "report-agent").at(-1)?.argv).toEqual([
+			"report-agent",
+			"--surface",
+			"18",
+			"--state",
+			"idle",
+			"--source",
+			"socket",
+			"--session",
+			"session-42",
+		]);
+		expect(harness.intervals).toHaveLength(1);
 		await harness.dispose();
 	});
 

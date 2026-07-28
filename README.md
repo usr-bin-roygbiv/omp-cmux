@@ -9,9 +9,9 @@ An [Oh My Pi (OMP)](https://omp.sh) marketplace plugin that exposes cmux through
 - cmux GUI or `cmux-tui` `0.9.6` or newer installed and running, with its CLI available on `PATH`
 - OMP launched inside the target backend:
   - GUI cmux supplies `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`.
-  - cmux TUI supplies `CMUX_TUI_SOCKET`, a numeric `CMUX_TUI_SURFACE_ID`, and `CMUX_TUI_WORKSPACE_ID`.
+  - cmux TUI supplies `CMUX_TUI_SOCKET`; a numeric `CMUX_TUI_SURFACE_ID` remains the preferred exact target when available. With cmux TUI 0.9.6, the plugin can recover an omitted surface ID only when exactly one registered surface process is the current OMP process or its direct parent.
 
-Lifecycle mutations never fall back to focused state. The plugin selects cmux TUI whenever `CMUX_TUI_SOCKET` is present and otherwise retains GUI routing. Missing or invalid required IDs fail closed.
+Lifecycle mutations never fall back to focused state. The plugin selects cmux TUI whenever `CMUX_TUI_SOCKET` is present and otherwise retains GUI routing. Missing GUI IDs and missing, invalid, stale, or ambiguous TUI process ownership fail closed.
 
 ## Install
 
@@ -87,7 +87,7 @@ For remote or nested sessions:
 
 1. Run `omp plugin doctor` and `omp plugin list`.
 2. Confirm that the correct executable is reachable and that the selected backend's routing variables are **set**; do not paste their values.
-3. For GUI, preserve both GUI target IDs. For TUI, preserve `CMUX_TUI_SOCKET` and the numeric TUI surface ID. Never post socket paths or passwords in logs or support requests.
+3. For GUI, preserve both GUI target IDs. For TUI, preserve `CMUX_TUI_SOCKET`; preserve the numeric TUI surface ID when it is available, otherwise confirm that OMP is the surface process or its direct child. Never post socket paths or passwords in logs or support requests.
 4. Increase `CMUX_OMP_TIMEOUT_MS` only for a known slow connection. Keep the output limit bounded.
 
 Report versions, tool error categories, and whether required variables are set—not hostnames, local paths, IDs, socket values, tokens, or captured workspace content.

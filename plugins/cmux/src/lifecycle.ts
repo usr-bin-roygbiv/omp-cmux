@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
-import { exactTargetArgs, runCmux } from "./cmux.ts";
+import { exactTargetArgs, parseCmuxJson, runCmux } from "./cmux.ts";
 import {
 	LifecycleStateMachine,
 	type LifecycleAction,
@@ -78,6 +78,25 @@ function boolean(value: unknown): boolean | undefined {
 
 function number(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function tuiSurfaceIds(output: string): string[] {
+	const payload = record(parseCmuxJson<unknown>(output));
+	if (!Array.isArray(payload?.ids)) return [];
+	const surfaces: string[] = [];
+	for (const value of payload.ids) {
+		const entry = record(value);
+		const id = number(entry?.id);
+		if (entry?.kind === "surface" && id !== undefined && Number.isSafeInteger(id) && id > 0) {
+			surfaces.push(String(id));
+		}
+	}
+	return surfaces;
+}
+
+function tuiProcessPid(output: string): number | undefined {
+	const pid = number(record(parseCmuxJson<unknown>(output))?.pid);
+	return pid !== undefined && Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
 }
 
 function messageRole(event: unknown): string | undefined {
@@ -260,7 +279,13 @@ function notificationPresentation(kind: NotificationKind, body: string): { title
 /** Register root-UI lifecycle, telemetry, and semantic notifications for GUI cmux or cmux TUI. */
 export function registerCmuxLifecycle(
 	api: ExtensionAPI,
-	options: { run?: typeof runCmux; env?: NodeJS.ProcessEnv; now?: () => number } = {},
+	options: {
+		run?: typeof runCmux;
+		env?: NodeJS.ProcessEnv;
+		now?: () => number;
+		pid?: number;
+		ppid?: number;
+	} = {},
 ): () => Promise<void> {
 	const looseApi = api as unknown as ExtensionApiLike;
 	const machine = new LifecycleStateMachine();
@@ -274,8 +299,8 @@ export function registerCmuxLifecycle(
 	const now = options.now ?? Date.now;
 	const tuiRequested = Boolean(text(targetEnv.CMUX_TUI_SOCKET));
 	const rawTuiSurface = text(targetEnv.CMUX_TUI_SURFACE_ID);
-	const tuiSurface = rawTuiSurface && /^\d+$/.test(rawTuiSurface) ? rawTuiSurface : undefined;
-	const backend: "tui" | "gui" | "none" = tuiRequested ? (tuiSurface ? "tui" : "none") : "gui";
+	let tuiSurface = rawTuiSurface && /^\d+$/.test(rawTuiSurface) ? rawTuiSurface : undefined;
+	const backend: "tui" | "gui" = tuiRequested ? "tui" : "gui";
 	let workspaceArgs: string[] | undefined;
 	let surfaceArgs: string[] | undefined;
 	if (backend === "gui") {
@@ -288,6 +313,45 @@ export function registerCmuxLifecycle(
 	let telemetryTimer: Timer | undefined;
 	let lastTuiReport: string | undefined;
 	let commandTail = Promise.resolve();
+	let tuiSurfaceDiscovery: Promise<string | undefined> | undefined;
+	const tuiBinary = targetEnv.CMUX_OMP_TUI_BINARY?.trim() || "cmux-tui";
+
+	const discoverTuiSurface = async (): Promise<string | undefined> => {
+		if (tuiSurface || backend !== "tui") return tuiSurface;
+		tuiSurfaceDiscovery ??= (async () => {
+			const idsResult = await runner(["ids", "--json"], { env: targetEnv, binary: tuiBinary });
+			if (!idsResult.ok) return undefined;
+			let surfaceIds: string[];
+			try {
+				surfaceIds = tuiSurfaceIds(idsResult.stdout);
+			} catch {
+				return undefined;
+			}
+			const ownerPids = new Set(
+				[options.pid ?? process.pid, options.ppid ?? process.ppid]
+					.filter(pid => Number.isSafeInteger(pid) && pid > 0),
+			);
+			const matches: string[] = [];
+			for (const surfaceId of surfaceIds) {
+				const processResult = await runner(
+					["process-info", "--surface", surfaceId, "--json"],
+					{ env: targetEnv, binary: tuiBinary },
+				);
+				if (!processResult.ok) continue;
+				try {
+					const pid = tuiProcessPid(processResult.stdout);
+					if (pid !== undefined && ownerPids.has(pid)) matches.push(surfaceId);
+				} catch {
+					// Malformed or stale surfaces are ignored; exact unique ownership is required.
+				}
+			}
+			if (matches.length !== 1) return undefined;
+			tuiSurface = matches[0];
+			targetEnv.CMUX_TUI_SURFACE_ID = tuiSurface;
+			return tuiSurface;
+		})();
+		return tuiSurfaceDiscovery;
+	};
 
 	const enqueue = (args: string[], binary?: string, allowDisposed = false): void => {
 		if (!allowDisposed && disposed) return;
@@ -325,7 +389,7 @@ export function registerCmuxLifecycle(
 		const signature = JSON.stringify(args);
 		if (signature === lastTuiReport) return;
 		lastTuiReport = signature;
-		enqueue(args, targetEnv.CMUX_OMP_TUI_BINARY?.trim() || "cmux-tui");
+		enqueue(args, tuiBinary);
 	};
 
 	const startTelemetry = (ctx: ExtensionContext): void => {
@@ -403,7 +467,7 @@ export function registerCmuxLifecycle(
 		}
 		const presentation = notificationPresentation(kind, body);
 		if (backend === "tui" && tuiSurface) {
-			enqueue(["notify", "--title", presentation.title, "--subtitle", presentation.subtitle, "--body", presentation.body, "--level", presentation.level, "--surface", tuiSurface], targetEnv.CMUX_OMP_TUI_BINARY?.trim() || "cmux-tui");
+			enqueue(["notify", "--title", presentation.title, "--subtitle", presentation.subtitle, "--body", presentation.body, "--level", presentation.level, "--surface", tuiSurface], tuiBinary);
 			return;
 		}
 		if (surfaceArgs) enqueue(["notify", "--title", presentation.title, "--subtitle", presentation.subtitle, "--body", presentation.body, ...surfaceArgs]);
@@ -417,18 +481,21 @@ export function registerCmuxLifecycle(
 		});
 	};
 
-	const sessionStart = (_event: unknown, ctx: ExtensionContext): void => {
+	const sessionStart = async (_event: unknown, ctx: ExtensionContext): Promise<void> => {
 		rootActive = true;
 		promptGenerationBySession.clear();
 		lastTuiReport = undefined;
 		dispatch({ type: "session-start" });
+		if (backend === "tui") await discoverTuiSurface();
+		reportTui();
 		startTelemetry(ctx);
 	};
 	on("session_start", sessionStart);
 	on("session_switch", sessionStart);
 	on("session_branch", sessionStart);
-	on("before_agent_start", (event, ctx) => {
-		if (!rootActive) sessionStart({ type: "session_start" }, ctx);
+	on("before_agent_start", async (event, ctx) => {
+		if (!rootActive) await sessionStart({ type: "session_start" }, ctx);
+		else if (backend === "tui" && !tuiSurface) await discoverTuiSurface();
 		startTelemetry(ctx);
 		const sessionId = contextSessionId(ctx);
 		if (sessionId) promptGenerationBySession.set(sessionId, (promptGenerationBySession.get(sessionId) ?? 0) + 1);
