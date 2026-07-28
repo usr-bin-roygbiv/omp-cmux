@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import {
 	exactTargetArgs,
+	exactSurfaceTarget,
 	parseCmuxJson,
 	runCmux,
 	type CmuxCommandResult,
@@ -31,6 +32,7 @@ interface CmuxToolDetails {
 	json?: unknown;
 	validationError?: string;
 	jsonError?: string;
+	target?: { workspaceId: string; surfaceId: string };
 }
 interface CmuxToolResult {
 	content: Array<{ type: "text"; text: string }>;
@@ -55,6 +57,30 @@ function registerTool<TInput>(api: ExtensionAPI, definition: LocalToolDefinition
 function required(value: string | undefined, name: string): string {
 	if (value === undefined || value.trim() === "") throw new TypeError(`${name} is required for this action`);
 	return value;
+}
+
+const TERMINAL_KEY_ALIASES: Record<string, string> = {
+	ESC: "escape",
+	ESCAPE: "escape",
+	RETURN: "enter",
+	ENTER: "enter",
+	LEFT: "left",
+	RIGHT: "right",
+	UP: "up",
+	DOWN: "down",
+	TAB: "tab",
+	BACKSPACE: "backspace",
+	DELETE: "delete",
+	SPACE: "space",
+};
+
+function normalizeTerminalKey(value: string | undefined): string {
+	const key = required(value, "key").trim();
+	const named = TERMINAL_KEY_ALIASES[key.toUpperCase()];
+	if (named !== undefined) return named;
+	const control = /^(?:C-|CTRL[_+-])(.+)$/i.exec(key);
+	if (control?.[1]) return `ctrl+${control[1].toLowerCase()}`;
+	return key.toLowerCase();
 }
 
 function appendOption(args: string[], flag: string, value: string | number | undefined): void {
@@ -90,6 +116,32 @@ function resultText(result: CmuxCommandResult): string {
 	let text = primary || (result.ok ? "cmux command completed successfully." : result.error?.message || "cmux command failed.");
 	if (result.truncated.stdout || result.truncated.stderr) text += "\n[cmux output truncated at the configured byte limit]";
 	return text;
+}
+
+const TERMINAL_READ_RETRY_DELAYS_MS = [100, 300, 750, 2_000] as const;
+const TRANSIENT_TERMINAL_READ_ERROR = "Error: internal_error: Failed to read terminal text";
+
+function isTransientTerminalRead(result: CmuxToolResult): boolean {
+	const command = result.details.result;
+	if (!command || command.ok) return false;
+	return (command.stderr.trim() || command.stdout.trim()) === TRANSIENT_TERMINAL_READ_ERROR;
+}
+
+async function waitForRetry(delayMs: number, signal: AbortSignal | undefined): Promise<boolean> {
+	if (signal?.aborted) return false;
+	const { promise, resolve } = Promise.withResolvers<boolean>();
+	let settled = false;
+	function finish(ready: boolean): void {
+		if (settled) return;
+		settled = true;
+		clearTimeout(timer);
+		signal?.removeEventListener("abort", onAbort);
+		resolve(ready);
+	}
+	const onAbort = () => finish(false);
+	const timer = setTimeout(() => finish(true), delayMs);
+	signal?.addEventListener("abort", onAbort, { once: true });
+	return await promise;
 }
 
 async function executeCommand(
@@ -213,7 +265,7 @@ function surfaceArgv(input: CmuxSurfaceInput): string[] {
 		case "send_text":
 			return ["--json", "send", ...exactTargetArgs(target, "surface"), "--", required(input.text, "text")];
 		case "send_key":
-			return ["--json", "send-key", ...exactTargetArgs(target, "surface"), "--", required(input.key, "key")];
+			return ["--json", "send-key", ...exactTargetArgs(target, "surface"), "--", normalizeTerminalKey(input.key)];
 		case "resume_show":
 			return ["--json", "surface", "resume", "show", ...exactTargetArgs(target, "surface")];
 		case "resume_clear":
@@ -229,6 +281,30 @@ function surfaceArgv(input: CmuxSurfaceInput): string[] {
 			return [...args, "--", ...input.command_argv];
 		}
 	}
+}
+
+async function executeSurfaceCommand(
+	input: CmuxSurfaceInput,
+	signal: AbortSignal | undefined,
+	runner: Runner,
+): Promise<CmuxToolResult> {
+	const argv = surfaceArgv(input);
+	let output = await executeCommand(`surface:${input.action}`, argv, input.timeout_ms, signal, runner, { parseJson: true });
+	if (input.action === "read") {
+		for (const delayMs of TERMINAL_READ_RETRY_DELAYS_MS) {
+			if (!isTransientTerminalRead(output) || !(await waitForRetry(delayMs, signal))) break;
+			output = await executeCommand(`surface:${input.action}`, argv, input.timeout_ms, signal, runner, { parseJson: true });
+		}
+	}
+	if (input.action === "close" && !output.isError) {
+		const target = exactSurfaceTarget(targetOf(input));
+		return {
+			...output,
+			content: [{ type: "text", text: `Closed surface ${target.surfaceId} in workspace ${target.workspaceId}.` }],
+			details: { ...output.details, target },
+		};
+	}
+	return output;
 }
 
 const BROWSER_COMMANDS: Record<CmuxBrowserInput["action"], string> = {
@@ -247,12 +323,23 @@ const BROWSER_COMMANDS: Record<CmuxBrowserInput["action"], string> = {
 
 function browserArgv(input: CmuxBrowserInput): string[] {
 	const command = BROWSER_COMMANDS[input.action];
-	const args = ["--json", "browser", command, ...(input.arguments ?? [])];
-	if (["disable", "enable", "status", "profiles", "import"].includes(input.action)) return args;
-	if (["open", "open_split", "new"].includes(input.action)) {
-		return [...args, ...exactTargetArgs(targetOf(input), "workspace")];
+	const nested = input.arguments ?? [];
+	switch (input.action) {
+		case "disable":
+		case "enable":
+		case "status":
+		case "profiles":
+		case "import":
+			return ["--json", "browser", command, ...nested];
+		case "open":
+		case "open_split":
+		case "new":
+			return ["--json", "browser", command, ...nested, ...exactTargetArgs(targetOf(input), "workspace")];
+		default: {
+			const target = exactSurfaceTarget(targetOf(input));
+			return ["--json", "browser", "--surface", target.surfaceId, command, ...nested];
+		}
 	}
-	return [...args, ...exactTargetArgs(targetOf(input), "surface")];
 }
 
 function notificationArgv(input: CmuxNotificationInput): string[] {
@@ -369,7 +456,7 @@ export function registerCmuxTools(api: ExtensionAPI, options: { run?: Runner } =
 	registerTool(api, {
 		name: "cmux_cli",
 		label: "cmux CLI",
-		description: "Run any current or future cmux command as an explicit argv array, never through a shell. This is the complete CLI escape hatch.",
+		description: "Prefer typed tools. Native GUI raw calls use top-level read-screen, close-surface, list-panels, and positional send-key KEY; never use surface read/close, list-surfaces, --key, or run without an argv array. open expects a local path, not file://; use browser goto for URLs. TUI syntax is separate and requires CMUX_TUI_SOCKET.",
 		parameters: CmuxCliSchema,
 		async execute(_id, params: CmuxCliInput, signal) {
 			return executeCommand("cli", [...params.argv], params.timeout_ms, signal, runner, {
@@ -393,10 +480,10 @@ export function registerCmuxTools(api: ExtensionAPI, options: { run?: Runner } =
 	registerTool(api, {
 		name: "cmux_surface",
 		label: "cmux Surface",
-		description: "Create, split, inspect, read, control, resume, or close cmux surfaces. Targeted actions require exact workspace and surface identities from parameters or cmux environment variables.",
+		description: "Create, split, inspect, read, control, resume, or close cmux surfaces. Targeted actions require exact workspace and surface identities from parameters or cmux environment variables. Reads retry only the exact transient terminal startup error; close results name the requested target.",
 		parameters: CmuxSurfaceSchema,
 		async execute(_id, params: CmuxSurfaceInput, signal) {
-			try { return await executeCommand(`surface:${params.action}`, surfaceArgv(params), params.timeout_ms, signal, runner, { parseJson: true }); }
+			try { return await executeSurfaceCommand(params, signal, runner); }
 			catch (error) { return failureResult(error instanceof Error ? error.message : "invalid surface action"); }
 		},
 	});
@@ -404,7 +491,7 @@ export function registerCmuxTools(api: ExtensionAPI, options: { run?: Runner } =
 	registerTool(api, {
 		name: "cmux_browser",
 		label: "cmux Browser",
-		description: "Use the complete documented cmux browser automation action set. Nested action arguments are an argv array; no shell parsing occurs. Surface actions fail closed without exact routing.",
+		description: "Use snapshot first, then standard CSS or a returned ref for browser actions; Playwright :has-text selectors are unsupported. WKWebView does not support network requests or input_mouse. Nested action arguments are an argv array, no shell parsing occurs, and exact surface routing is required.",
 		parameters: CmuxBrowserSchema,
 		async execute(_id, params: CmuxBrowserInput, signal) {
 			try { return await executeCommand(`browser:${params.action}`, browserArgv(params), params.timeout_ms, signal, runner, { parseJson: true }); }

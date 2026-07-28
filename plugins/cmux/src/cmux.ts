@@ -8,6 +8,8 @@ const MAX_TIMEOUT_MS = 300_000;
 const MAX_OUTPUT_BYTES = 16 * 1_048_576;
 const KILL_GRACE_MS = 250;
 
+const CMUX_GUI_BINARY = "/Applications/cmux.app/Contents/Resources/bin/cmux";
+
 const SAFE_ENVIRONMENT_KEYS = new Set([
 	"PATH",
 	"HOME",
@@ -55,6 +57,8 @@ export interface CmuxRunOptions {
 	env?: NodeJS.ProcessEnv;
 	/** Test seam; production callers should use the default direct process spawner. */
 	spawn?: typeof nodeSpawn;
+	/** Test seam; production callers should use the current Node platform. */
+	platform?: NodeJS.Platform;
 }
 
 export interface CmuxCommandError {
@@ -104,6 +108,17 @@ function exactIdentity(value: string | undefined, label: string): string {
 		throw new TypeError(`${label} is required; pass it explicitly or set the matching cmux environment variable`);
 	}
 	return validateArg(normalized, label);
+}
+
+/** Select the native GUI CLI for complete Darwin GUI sessions, despite stale inherited TUI configuration. */
+export function selectCmuxBinary(
+	env: NodeJS.ProcessEnv = process.env,
+	platform: NodeJS.Platform = process.platform,
+): string | undefined {
+	const hasGuiTarget = Boolean(env.CMUX_WORKSPACE_ID?.trim() && env.CMUX_SURFACE_ID?.trim());
+	const hasTuiSocket = Boolean(env.CMUX_TUI_SOCKET?.trim());
+	if (platform === "darwin" && hasGuiTarget && !hasTuiSocket) return CMUX_GUI_BINARY;
+	return env.CMUX_OMP_BINARY;
 }
 
 /** Resolve an explicit binary path without ever invoking a shell. */
@@ -240,7 +255,7 @@ export async function runCmux(args: readonly string[], options: CmuxRunOptions =
 	let maxOutputBytes: number;
 	try {
 		const env = options.env ?? process.env;
-		binary = resolveCmuxBinary(options.binary ?? env.CMUX_OMP_BINARY, options.cwd ?? process.cwd());
+		binary = resolveCmuxBinary(options.binary ?? selectCmuxBinary(env, options.platform ?? process.platform), options.cwd ?? process.cwd());
 		timeoutMs = normalizeLimit(
 			options.timeoutMs,
 			configuredInteger(env.CMUX_OMP_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, 1, MAX_TIMEOUT_MS),
