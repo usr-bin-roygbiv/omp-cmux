@@ -73,7 +73,7 @@ Native backend notifications are emitted for:
 3. a successful `xd://propose` plan submission; and
 4. the final `session_stop`, classified as completion, input required, blocked, or error.
 
-GUI notifications use the semantic subtitle plus the machine and `GUI` identity, so concurrent sessions are distinguishable. cmux TUI `0.9.6` / protocol 10 does not accept `--subtitle`; the plugin omits that unsupported flag and appends `Session: <machine> · cmux TUI` to the body instead.
+Both native paths receive the same semantic subtitle: `Waiting`, `Permission`, `Plan Ready`, `Completed`, `Blocked`, or `Error`. cmux TUI subtitle and agent-telemetry support require protocol 12.
 
 Each `before_agent_start` result appends a compact `<runtime-environment>` system-prompt block with the current machine and `cmux GUI`, `cmux TUI`, or `headless agent under ...` interface. The block is replaced rather than duplicated on later turns. Lifecycle effects remain root/UI-only: subagents and headless sessions receive environment awareness without producing statuses or notifications. Each semantic event is deduplicated by its stable session/tool-call or session/turn identity. Aborted turns and stops already owned by another stop hook are suppressed. A root interactive session inside remote tmux without a cmux surface retains the session-entry notification fallback. The entrypoint sets `CMUX_OMP_HOOKS_DISABLED=1` before registration to prevent duplicate legacy hooks.
 
