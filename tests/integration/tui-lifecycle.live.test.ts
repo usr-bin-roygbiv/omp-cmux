@@ -31,7 +31,7 @@ const context: LiveContext = {
 };
 
 liveTest(
-	"reports rich lifecycle telemetry and native notifications to a live cmux TUI surface",
+	"reports lifecycle state and native notifications to a live cmux TUI surface",
 	async () => {
 		const handlers = new Map<string, Handler[]>();
 		const busHandlers = new Map<string, Array<(payload: unknown) => void>>();
@@ -85,9 +85,10 @@ liveTest(
 				result: { details: { phases: [{ name: "Probe", tasks: [{ content: "Start", status: "completed" }, { content: "Finish", status: "in_progress" }] }] } },
 			});
 			emitBus("task:subagent:progress", { agent: "LiveWorker", progress: { id: "live-agent", status: "running", currentTool: "read" } });
-			const working = await waitFor(agent => agent.state === "working" && agent.tasks_completed === 1 && agent.tasks_total === 2 && agent.agents_active === 2);
-			expect(typeof working.started_at_ms).toBe("number");
-			expect(typeof working.jobs_running).toBe("number");
+			const working = await waitFor(agent => agent.state === "working" && agent.session === "omp-cmux-live-probe");
+			expect(working.surface).toBe(Number(surface));
+			expect(working.source).toBe("socket");
+			expect(typeof working.updated_at_ms).toBe("number");
 			await emit("tool_execution_start", { toolCallId: "ask-live", toolName: "ask" });
 			await emit("session_stop", {
 				turn_id: 1,
