@@ -32,6 +32,8 @@ import {
 } from "./schemas";
 import { CMUX_SOURCE_CONTRACT } from "./source-contracts";
 
+type CmuxSourceContract = (typeof CMUX_SOURCE_CONTRACT)[CmuxBackend];
+
 interface CmuxToolDetails {
 	operation: string;
 	backend?: CmuxBackend;
@@ -40,7 +42,7 @@ interface CmuxToolDetails {
 	validationError?: string;
 	jsonError?: string;
 	target?: { workspaceId: string; surfaceId: string };
-	sourceContract?: unknown;
+	sourceContract?: CmuxSourceContract;
 }
 interface CmuxToolResult {
 	content: Array<{ type: "text"; text: string }>;
@@ -126,6 +128,22 @@ function resultText(result: CmuxCommandResult): string {
 	return text;
 }
 
+function formatSourceContract(backend: CmuxBackend, contract: CmuxSourceContract): string {
+	const lines = [
+		`Backend: ${backend}`,
+		`Source: ${contract.source}`,
+		`CLI commands (${contract.commands.length}): ${contract.commands.join(", ")}`,
+	];
+	if ("browserActions" in contract) {
+		lines.push(`Browser actions (${contract.browserActions.length}): ${contract.browserActions.join(", ")}`);
+	}
+	if ("protocolCommands" in contract) {
+		lines.push(`Protocol source: ${contract.protocolSource}`);
+		lines.push(`Protocol commands (${contract.protocolCommands.length}): ${contract.protocolCommands.join(", ")}`);
+	}
+	return lines.join("\n");
+}
+
 const TERMINAL_READ_RETRY_DELAYS_MS = [100, 300, 750, 2_000] as const;
 const TRANSIENT_TERMINAL_READ_ERROR = "Error: internal_error: Failed to read terminal text";
 
@@ -159,7 +177,7 @@ async function executeCommand(
 	signal: AbortSignal | undefined,
 	runner: Runner,
 	context: { backend: CmuxBackend; env: NodeJS.ProcessEnv },
-	options: { stdin?: string; requireJson?: boolean; parseJson?: boolean; sourceContract?: unknown } = {},
+	options: { stdin?: string; requireJson?: boolean; parseJson?: boolean; sourceContract?: CmuxSourceContract } = {},
 ): Promise<CmuxToolResult> {
 	const result = await runner(args, {
 		binary: resolveCmuxBackendBinary(context.backend, context.env),
@@ -190,6 +208,9 @@ async function executeCommand(
 		jsonFailure = true;
 		details.jsonError = "cmux returned empty JSON output";
 		text = details.jsonError;
+	}
+	if (result.ok && !jsonFailure && options.sourceContract) {
+		text = `${text}\n\n${formatSourceContract(context.backend, options.sourceContract)}`;
 	}
 	return {
 		content: [{ type: "text", text }],

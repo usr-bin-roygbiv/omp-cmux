@@ -119,12 +119,24 @@ describe("cmux coverage escape hatches", () => {
 		const result = await execute(harness, "cmux_capabilities", { timeout_ms: 4321 }, signal);
 
 		expect(harness.calls).toEqual([{ argv: ["capabilities"], options: { timeoutMs: 4321, signal } }]);
+		expect(result.content).toHaveLength(1);
+		expect(result.content[0]?.type).toBe("text");
+		const text = result.content[0]?.text ?? "";
+		expect(text).toStartWith('{"rpcMethods":["workspace.list"],"features":["browser"]}');
+		expect(text).toContain("Backend: gui");
+		expect(text).toContain("CLI commands");
+		expect(text).toContain("Browser actions");
 		expect(result).toMatchObject({
-			content: [{ type: "text", text: '{"rpcMethods":["workspace.list"],"features":["browser"]}' }],
 			details: {
 				operation: "capabilities",
+				backend: "gui",
 				json: { rpcMethods: ["workspace.list"], features: ["browser"] },
 				result: { ok: true },
+				sourceContract: {
+					source: expect.any(String),
+					commands: expect.arrayContaining(["list-workspaces"]),
+					browserActions: expect.arrayContaining(["snapshot"]),
+				},
 			},
 			isError: false,
 		});

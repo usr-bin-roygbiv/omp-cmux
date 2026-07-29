@@ -9,7 +9,7 @@ An [Oh My Pi (OMP)](https://omp.sh) marketplace plugin that exposes cmux through
 - cmux GUI or `cmux-tui` `0.9.6` or newer installed and running, with its CLI available on `PATH`; structured per-workspace root-status counts require protocol 12
 - OMP launched inside the target backend:
   - GUI cmux supplies `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`.
-  - cmux TUI supplies `CMUX_TUI_SOCKET`; a numeric `CMUX_TUI_SURFACE_ID` remains the preferred exact target. When the surface ID is omitted, the plugin recovers it only when exactly one registered surface process is the current OMP process or its direct parent.
+  - cmux TUI supplies `CMUX_TUI_SOCKET`; numeric `CMUX_TUI_SURFACE_ID` and `CMUX_TUI_WORKSPACE_ID` values remain the preferred exact targets when available. With cmux TUI 0.9.6, the plugin can recover an omitted surface ID only when exactly one registered surface process is the current OMP process or its direct parent; workspace mutations never infer focused state.
 
 Lifecycle mutations never fall back to focused state. The plugin selects cmux TUI whenever `CMUX_TUI_SOCKET` is present. On Darwin, complete GUI workspace and surface identities force `/Applications/cmux.app/Contents/Resources/bin/cmux`, even when the process inherited a stale `CMUX_OMP_BINARY` pointing at npm `cmux-tui`. Missing GUI IDs and missing, invalid, stale, or ambiguous TUI process ownership fail closed.
 
@@ -43,7 +43,7 @@ Five typed tools cover common operations with exact targets:
 
 Three escape hatches preserve access to the complete, evolving source contracts:
 
-- `cmux_capabilities` runs GUI capability discovery or TUI `--json identify`, then returns the detected backend and source-derived GUI command or TUI CLI/protocol inventories.
+- `cmux_capabilities` runs GUI capability discovery or TUI `--json identify`, then includes the detected backend and compact source-derived GUI command or TUI CLI/protocol inventories in the model-visible result.
 - `cmux_rpc` invokes arbitrary GUI JSON-RPC methods. It rejects TUI calls before execution because the TUI has no JSON-RPC endpoint.
 - `cmux_cli` runs an explicit argument vector against the detected backend binary without a shell. It covers every source-listed GUI command and every TUI CLI verb, including future commands before a typed mapping exists.
 
@@ -51,7 +51,7 @@ Each tool returns readable content plus structured details. Failures are reporte
 
 Typed operations also encode native contracts that are easy to misapply through raw CLI calls:
 
-- Mutations never resolve a focused workspace, pane, or surface. GUI uses explicit or injected workspace and surface IDs; TUI requires numeric workspace, pane, or surface IDs as appropriate.
+- Mutations never resolve focused state. GUI uses explicit or injected workspace and surface IDs; TUI close/rename require a numeric `workspace_id` or `CMUX_TUI_WORKSPACE_ID`, while pane/surface operations require their matching numeric IDs.
 - `cmux_surface read` retries only the exact transient `Failed to read terminal text` GUI startup race, with a bounded delay window.
 - Browser surfaces are created through `cmux_browser open` or `new`; GUI `cmux_surface create` rejects `type: browser`, while TUI browser creation requires an explicit `--pane` argument.
 - `cmux_surface send_key` normalizes common aliases such as `CTRL_B`, `C-b`, `CTRL_C`, `ESC`, `ENTER`, and `LEFT` to native positional key names.

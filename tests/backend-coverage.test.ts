@@ -15,7 +15,7 @@ import {
 	CMUX_TUI_COMMANDS,
 	CMUX_TUI_PROTOCOL_COMMANDS,
 } from "../plugins/cmux/src/source-contracts.ts";
-import { CmuxBrowserSchema } from "../plugins/cmux/src/schemas.ts";
+import { CmuxBrowserSchema, CmuxWorkspaceSchema } from "../plugins/cmux/src/schemas.ts";
 import { registerCmuxTools } from "../plugins/cmux/src/tools.ts";
 
 type ToolResult = {
@@ -180,6 +180,20 @@ describe("TUI-aware typed tools", () => {
 				sourceContract: { commands: [...CMUX_TUI_COMMANDS], protocolCommands: [...CMUX_TUI_PROTOCOL_COMMANDS] },
 			},
 		});
+		expect(result.content[0]?.text).toMatch(/backend:\s*tui/iu);
+		expect(result.content[0]?.text).toMatch(/CLI commands[^]*list-workspaces[^]*new-browser-tab/iu);
+		expect(result.content[0]?.text).toMatch(/protocol commands/iu);
+		expect(result.content[0]?.text).toContain("create-workspace");
+		expect(result.content[0]?.text).toContain("browser-navigate");
+	});
+
+	test("documents the exact numeric TUI workspace target in the callable schema", () => {
+		const schema = CmuxWorkspaceSchema as unknown as {
+			properties: { workspace_id: { description?: string } };
+		};
+		const workspaceId = schema.properties.workspace_id.description;
+		expect(workspaceId).toMatch(/TUI[^.]*numeric[^.]*(?:workspace_id|CMUX_TUI_WORKSPACE_ID)/u);
+		expect(workspaceId).toMatch(/never[^.]*focused/iu);
 	});
 
 	test("registers only tools and actions supported by the active backend", async () => {

@@ -46,7 +46,12 @@ export const CmuxWorkspaceSchema = Type.Object(
 			Type.Literal("loading"),
 			Type.Literal("group"),
 		]),
-		workspace_id: Type.Optional(Handle),
+		workspace_id: Type.Optional(Type.String({
+			minLength: 1,
+			maxLength: 512,
+			pattern: "^[^\\u0000]+$",
+			description: "Exact workspace ID. TUI close and rename require a numeric workspace_id or CMUX_TUI_WORKSPACE_ID; never infer focused state.",
+		})),
 		window_id: Type.Optional(Handle),
 		name: Type.Optional(NonEmptyString),
 		cwd: Type.Optional(NonEmptyString),
