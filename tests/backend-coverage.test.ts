@@ -232,6 +232,8 @@ describe("cluster update CI", () => {
 		expect(pipeline).toContain("latest-omp-contract:");
 		expect(pipeline).toContain("@oh-my-pi/pi-coding-agent@latest");
 		expect(pipeline).toContain("serviceAccountName: woodpecker-ci-untrusted");
+		expect(pipeline.match(/ephemeral-storage: 512Mi/g) ?? []).toHaveLength(2);
+		expect(pipeline.match(/ephemeral-storage: 4Gi/g) ?? []).toHaveLength(2);
 		expect(pipeline).toContain("mirror.gcr.io/oven/bun:");
 		expect(pipeline).not.toMatch(/docker\.io|hostPath|privileged:\s*true/i);
 	});
