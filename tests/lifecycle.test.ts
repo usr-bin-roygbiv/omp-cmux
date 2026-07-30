@@ -95,8 +95,12 @@ function commands(calls: RunCall[], command: string): string[][] {
 	return calls.map(call => call.argv).filter(argv => argv[0] === command);
 }
 
-function mainStatuses(calls: RunCall[]): string[] {
+function rawMainStatuses(calls: RunCall[]): string[] {
 	return commands(calls, "set-status").filter(argv => argv[1] === "omp_plugin").map(argv => argv[2]!);
+}
+
+function mainStatuses(calls: RunCall[]): string[] {
+	return rawMainStatuses(calls).map(status => status.replace(/^\d+ agents? · /u, ""));
 }
 
 function notifications(calls: RunCall[]): string[][] {
@@ -125,6 +129,27 @@ describe("OMP lifecycle adapter", () => {
 		expect(mainStatuses(testHarness.calls)).toEqual(["Idle", "Working", "Thinking", "Done"]);
 		expect(notifications(testHarness.calls)).toHaveLength(1);
 		expect(notifications(testHarness.calls)[0]).toContain("OMP turn complete");
+	});
+
+	test("summarizes the root and live subagents in the workspace status", async () => {
+		const testHarness = harness();
+		await testHarness.emit("session_start");
+		expect(rawMainStatuses(testHarness.calls).at(-1)).toBe("1 agent · Idle");
+
+		await testHarness.emit("before_agent_start");
+		expect(rawMainStatuses(testHarness.calls).at(-1)).toBe("1 agent · Working");
+
+		await testHarness.emitBus("task:subagent:progress", {
+			agent: "WorkerOne",
+			progress: { id: "agent-1", status: "running", currentTool: "edit" },
+		});
+		expect(rawMainStatuses(testHarness.calls).at(-1)).toBe("2 agents · Working");
+
+		await testHarness.emitBus("task:subagent:progress", {
+			agent: "WorkerOne",
+			progress: { id: "agent-1", status: "completed" },
+		});
+		expect(rawMainStatuses(testHarness.calls).at(-1)).toBe("1 agent · Working");
 	});
 
 	test("routes every primary lifecycle status and only the two allowed notifications", async () => {

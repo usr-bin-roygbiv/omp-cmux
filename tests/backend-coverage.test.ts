@@ -27,6 +27,7 @@ type ToolResult = {
 type ToolDefinition = {
 	name: string;
 	description: string;
+	parameters: unknown;
 	execute: (id: string, params: Record<string, unknown>, signal?: AbortSignal) => Promise<ToolResult>;
 };
 
@@ -94,6 +95,11 @@ async function execute(
 
 function contract(name: string): CommandContract {
 	return JSON.parse(readFileSync(resolve(import.meta.dir, `contracts/${name}`), "utf8")) as CommandContract;
+}
+
+function actionNames(tool: ToolDefinition | undefined): string[] {
+	const schema = tool?.parameters as { properties?: { action?: { anyOf?: Array<{ const?: unknown }> } } } | undefined;
+	return schema?.properties?.action?.anyOf?.flatMap(entry => typeof entry.const === "string" ? [entry.const] : []) ?? [];
 }
 
 describe("backend detection and binary routing", () => {
@@ -176,21 +182,42 @@ describe("TUI-aware typed tools", () => {
 		});
 	});
 
-	test("keeps GUI capabilities and RPC native while rejecting TUI RPC before execution", async () => {
+	test("registers only tools and actions supported by the active backend", async () => {
 		const gui = toolHarness(GUI_ENV);
+		expect([...gui.tools.keys()]).toEqual([
+			"cmux_capabilities",
+			"cmux_rpc",
+			"cmux_cli",
+			"cmux_workspace",
+			"cmux_surface",
+			"cmux_browser",
+			"cmux_notification",
+			"cmux_sidebar",
+		]);
+		expect(gui.tools.get("cmux_cli")?.description).toContain("cmux GUI");
 		await execute(gui, "cmux_capabilities", {});
 		await execute(gui, "cmux_rpc", { method: "workspace.list", params: {} });
 		expect(gui.calls.map(call => call.argv)).toEqual([
 			["capabilities"],
 			["rpc", "workspace.list", "{}"],
 		]);
-		expect(gui.calls.every(call => call.options.binary === "cmux-gui-test")).toBe(true);
 
 		const tui = toolHarness(TUI_ENV);
-		const rejected = await execute(tui, "cmux_rpc", { method: "workspace.list" });
-		expect(tui.calls).toEqual([]);
-		expect(rejected.isError).toBe(true);
-		expect(rejected.content[0]?.text).toMatch(/RPC is available only in cmux GUI; use cmux_cli for TUI/i);
+		expect([...tui.tools.keys()]).toEqual([
+			"cmux_capabilities",
+			"cmux_cli",
+			"cmux_workspace",
+			"cmux_surface",
+			"cmux_browser",
+			"cmux_notification",
+		]);
+		expect(tui.tools.has("cmux_rpc")).toBe(false);
+		expect(tui.tools.has("cmux_sidebar")).toBe(false);
+		expect(tui.tools.get("cmux_cli")?.description).toContain("cmux TUI");
+		expect(actionNames(tui.tools.get("cmux_workspace"))).toEqual(["list", "create", "close", "rename"]);
+		expect(actionNames(tui.tools.get("cmux_surface"))).toEqual(["list", "create", "split", "close", "identify", "read", "send_text", "send_key"]);
+		expect(actionNames(tui.tools.get("cmux_browser"))).toEqual(["open", "new"]);
+		expect(actionNames(tui.tools.get("cmux_notification"))).toEqual(["send"]);
 	});
 
 	test("translates exact workspace, surface, browser creation, and notification actions", async () => {
@@ -211,13 +238,11 @@ describe("TUI-aware typed tools", () => {
 		]);
 	});
 
-	test("rejects GUI-only DOM automation and sidebar actions with precise backend errors", async () => {
+	test("omits GUI-only DOM and sidebar actions from TUI tool schemas", () => {
 		const harness = toolHarness(TUI_ENV);
-		const browser = await execute(harness, "cmux_browser", { action: "snapshot" });
-		const sidebar = await execute(harness, "cmux_sidebar", { action: "state" });
+		expect(actionNames(harness.tools.get("cmux_browser"))).not.toContain("snapshot");
+		expect(harness.tools.has("cmux_sidebar")).toBe(false);
 		expect(harness.calls).toEqual([]);
-		expect(browser.content[0]?.text).toMatch(/snapshot is not supported by cmux TUI/i);
-		expect(sidebar.content[0]?.text).toMatch(/sidebar state is not supported by cmux TUI/i);
 	});
 });
 
