@@ -219,7 +219,8 @@ async function executeCommand(
 	};
 }
 
-function workspaceArgv(input: CmuxWorkspaceInput, env: NodeJS.ProcessEnv): string[] { const target = targetOf(input);
+function workspaceArgv(input: CmuxWorkspaceInput, env: NodeJS.ProcessEnv): string[] {
+	const target = targetOf(input);
 	switch (input.action) {
 		case "list":
 			return ["--json", "workspace", "list", ...windowArgs(input.window_id)];
@@ -256,7 +257,8 @@ function workspaceArgv(input: CmuxWorkspaceInput, env: NodeJS.ProcessEnv): strin
 		case "group":
 			if (!input.group_args?.length) throw new TypeError("group_args must start with a workspace group subcommand");
 			return ["--json", "workspace", "group", ...input.group_args];
-	} }
+	}
+}
 
 function tuiWorkspaceArgv(input: CmuxWorkspaceInput, env: NodeJS.ProcessEnv): string[] {
 	switch (input.action) {
@@ -277,7 +279,8 @@ function tuiWorkspaceArgv(input: CmuxWorkspaceInput, env: NodeJS.ProcessEnv): st
 	}
 }
 
-function surfaceArgv(input: CmuxSurfaceInput, env: NodeJS.ProcessEnv): string[] { const target = targetOf(input);
+function surfaceArgv(input: CmuxSurfaceInput, env: NodeJS.ProcessEnv): string[] {
+	const target = targetOf(input);
 	switch (input.action) {
 		case "list":
 			return ["--json", "list-panels", ...exactTargetArgs(target, "workspace", env)];
@@ -336,7 +339,8 @@ function surfaceArgv(input: CmuxSurfaceInput, env: NodeJS.ProcessEnv): string[] 
 			appendOption(args, "--source", input.resume_source);
 			return [...args, "--", ...input.command_argv];
 		}
-	} }
+	}
+}
 
 function tuiSurfaceArgv(input: CmuxSurfaceInput, env: NodeJS.ProcessEnv): string[] {
 	const surface = () => exactTuiSurfaceTarget(input.surface_id, env);
@@ -411,7 +415,8 @@ const BROWSER_COMMANDS: Record<CmuxBrowserInput["action"], string> = {
 	identify: "identify",
 };
 
-function browserArgv(input: CmuxBrowserInput, env: NodeJS.ProcessEnv): string[] { const command = BROWSER_COMMANDS[input.action];
+function browserArgv(input: CmuxBrowserInput, env: NodeJS.ProcessEnv): string[] {
+	const command = BROWSER_COMMANDS[input.action];
 	const nested = input.arguments ?? [];
 	switch (input.action) {
 		case "disable":
@@ -428,7 +433,8 @@ function browserArgv(input: CmuxBrowserInput, env: NodeJS.ProcessEnv): string[] 
 			const target = exactSurfaceTarget(targetOf(input), env);
 			return ["--json", "browser", "--surface", target.surfaceId, command, ...nested];
 		}
-	} }
+	}
+}
 
 function tuiBrowserArgv(input: CmuxBrowserInput): string[] {
 	if (input.action !== "open" && input.action !== "new") {
@@ -440,7 +446,8 @@ function tuiBrowserArgv(input: CmuxBrowserInput): string[] {
 	return ["--json", "new-browser-tab", ...args];
 }
 
-function notificationArgv(input: CmuxNotificationInput, env: NodeJS.ProcessEnv): string[] { const target = targetOf(input);
+function notificationArgv(input: CmuxNotificationInput, env: NodeJS.ProcessEnv): string[] {
+	const target = targetOf(input);
 	switch (input.action) {
 		case "send": {
 			if (input.level) throw new TypeError("notification level is supported by cmux TUI only");
@@ -471,7 +478,8 @@ function notificationArgv(input: CmuxNotificationInput, env: NodeJS.ProcessEnv):
 			return ["--json", "jump-to-unread"];
 		case "clear":
 			return ["--json", "clear-notifications", ...exactTargetArgs(target, "workspace", env)];
-	} }
+	}
+}
 
 function tuiNotificationArgv(input: CmuxNotificationInput, env: NodeJS.ProcessEnv): string[] {
 	if (input.action !== "send") throw new TypeError(`notification ${input.action} is not supported by cmux TUI; use cmux_cli`);
@@ -489,7 +497,8 @@ function tuiNotificationArgv(input: CmuxNotificationInput, env: NodeJS.ProcessEn
 	return args;
 }
 
-function sidebarArgv(input: CmuxSidebarInput, env: NodeJS.ProcessEnv): string[] { const target = targetOf(input);
+function sidebarArgv(input: CmuxSidebarInput, env: NodeJS.ProcessEnv): string[] {
+	const target = targetOf(input);
 	const routed = () => exactTargetArgs(target, "workspace", env);
 	switch (input.action) {
 		case "set_status": {
@@ -536,16 +545,40 @@ function sidebarArgv(input: CmuxSidebarInput, env: NodeJS.ProcessEnv): string[] 
 		case "right_mode": return ["--json", "right-sidebar", "mode", ...routed()];
 		case "right_set":
 			return ["--json", "right-sidebar", "set", required(input.mode, "mode"), ...routed(), ...(input.no_focus ? ["--no-focus"] : [])];
-	} }
+	}
+}
 
 function toolContext(env: NodeJS.ProcessEnv): { backend: CmuxBackend; env: NodeJS.ProcessEnv } {
 	return { backend: detectCmuxBackend(env), env };
+}
+
+function actionSubsetSchema(schema: unknown, actions: readonly string[]): unknown {
+	const objectSchema = schema as {
+		properties?: Record<string, unknown> & { action?: { anyOf?: Array<{ const?: unknown }> } };
+	};
+	const properties = objectSchema.properties;
+	const action = properties?.action;
+	if (!properties || !action?.anyOf) throw new TypeError("cmux action schema is malformed");
+	return {
+		...objectSchema,
+		properties: {
+			...properties,
+			action: {
+				...action,
+				anyOf: action.anyOf.filter(entry => typeof entry.const === "string" && actions.includes(entry.const)),
+			},
+		},
+	};
 }
 
 /** Register raw escape hatches and high-value typed cmux tools. */
 export function registerCmuxTools(api: ExtensionAPI, options: { run?: Runner; env?: NodeJS.ProcessEnv } = {}): void {
 	const runner = options.run ?? runCmux;
 	const env = options.env ?? process.env;
+	let registeredBackend: CmuxBackend | undefined;
+	try { registeredBackend = detectCmuxBackend(env); } catch { registeredBackend = undefined; }
+	const isTuiBackend = registeredBackend === "tui";
+	const activeBackendLabel = isTuiBackend ? "cmux TUI" : registeredBackend === "gui" ? "cmux GUI" : "the detected cmux backend";
 
 	registerTool(api, {
 		name: "cmux_capabilities",
@@ -564,15 +597,14 @@ export function registerCmuxTools(api: ExtensionAPI, options: { run?: Runner; en
 		},
 	});
 
-	registerTool(api, {
+	if (!isTuiBackend) registerTool(api, {
 		name: "cmux_rpc",
 		label: "cmux RPC",
-		description: "Call any current or future GUI cmux JSON-RPC method directly. TUI sessions use cmux_cli because their public contract is the explicit TUI command registry.",
+		description: "Call any current or future cmux GUI JSON-RPC method directly.",
 		parameters: CmuxRpcSchema,
 		async execute(_id, params: CmuxRpcInput, signal) {
 			try {
 				const context = toolContext(env);
-				if (context.backend === "tui") throw new TypeError("RPC is available only in cmux GUI; use cmux_cli for TUI commands");
 				const argv = ["rpc", params.method];
 				if (params.params !== undefined) argv.push(JSON.stringify(params.params));
 				return await executeCommand(`rpc:${params.method}`, argv, params.timeout_ms, signal, runner, context, { requireJson: true });
@@ -585,7 +617,7 @@ export function registerCmuxTools(api: ExtensionAPI, options: { run?: Runner; en
 	registerTool(api, {
 		name: "cmux_cli",
 		label: "cmux CLI",
-		description: "Run any source-listed or future command against the detected GUI or TUI binary as an explicit argv array, never through a shell. Native read-screen and close-surface syntax uses positional values where documented; local paths may use file:// URLs.",
+		description: `Run any source-listed or future command against ${activeBackendLabel} as an explicit argv array, never through a shell. Native read-screen and close-surface syntax uses positional values where documented; local paths may use file:// URLs.`,
 		parameters: CmuxCliSchema,
 		async execute(_id, params: CmuxCliInput, signal) {
 			try {
@@ -603,8 +635,8 @@ export function registerCmuxTools(api: ExtensionAPI, options: { run?: Runner; en
 	registerTool(api, {
 		name: "cmux_workspace",
 		label: "cmux Workspace",
-		description: "Manage workspaces through backend-specific exact routing. Unsupported TUI operations fail with the matching raw cmux_cli path.",
-		parameters: CmuxWorkspaceSchema,
+		description: `Manage workspaces through exact ${activeBackendLabel} routing.`,
+		parameters: isTuiBackend ? actionSubsetSchema(CmuxWorkspaceSchema, ["list", "create", "close", "rename"]) : CmuxWorkspaceSchema,
 		async execute(_id, params: CmuxWorkspaceInput, signal) {
 			try {
 				const context = toolContext(env);
@@ -619,8 +651,8 @@ export function registerCmuxTools(api: ExtensionAPI, options: { run?: Runner; en
 	registerTool(api, {
 		name: "cmux_surface",
 		label: "cmux Surface",
-		description: "Create, split, inspect, read, control, resume, or close surfaces through the detected backend with exact identities.",
-		parameters: CmuxSurfaceSchema,
+		description: `Create, split, inspect, read, control, resume, or close surfaces through ${activeBackendLabel} with exact identities.`,
+		parameters: isTuiBackend ? actionSubsetSchema(CmuxSurfaceSchema, ["list", "create", "split", "close", "identify", "read", "send_text", "send_key"]) : CmuxSurfaceSchema,
 		async execute(_id, params: CmuxSurfaceInput, signal) {
 			try {
 				return await executeSurfaceCommand(params, signal, runner, toolContext(env));
@@ -633,8 +665,8 @@ export function registerCmuxTools(api: ExtensionAPI, options: { run?: Runner; en
 	registerTool(api, {
 		name: "cmux_browser",
 		label: "cmux Browser",
-		description: "Use the complete GUI WKWebView command set or create an exact TUI browser tab. GUI automation uses snapshot refs or standard CSS rather than :has-text; upstream network and input_mouse names remain discoverable but unsupported by WKWebView. TUI DOM actions fail closed.",
-		parameters: CmuxBrowserSchema,
+		description: isTuiBackend ? "Create an exact cmux TUI browser tab. DOM automation is unavailable on this backend." : "Use the complete cmux GUI WKWebView command set. Automation uses snapshot refs or standard CSS rather than :has-text; upstream network and input_mouse names remain discoverable but unsupported by WKWebView.",
+		parameters: isTuiBackend ? actionSubsetSchema(CmuxBrowserSchema, ["open", "new"]) : CmuxBrowserSchema,
 		async execute(_id, params: CmuxBrowserInput, signal) {
 			try {
 				const context = toolContext(env);
@@ -649,8 +681,8 @@ export function registerCmuxTools(api: ExtensionAPI, options: { run?: Runner; en
 	registerTool(api, {
 		name: "cmux_notification",
 		label: "cmux Notification",
-		description: "Send native GUI or TUI notifications; GUI additionally supports list, dismiss, mark, open, jump, and clear actions.",
-		parameters: CmuxNotificationSchema,
+		description: isTuiBackend ? "Send a native cmux TUI notification." : "Send and manage native cmux GUI notifications.",
+		parameters: isTuiBackend ? actionSubsetSchema(CmuxNotificationSchema, ["send"]) : CmuxNotificationSchema,
 		async execute(_id, params: CmuxNotificationInput, signal) {
 			try {
 				const context = toolContext(env);
@@ -662,15 +694,14 @@ export function registerCmuxTools(api: ExtensionAPI, options: { run?: Runner; en
 		},
 	});
 
-	registerTool(api, {
+	if (!isTuiBackend) registerTool(api, {
 		name: "cmux_sidebar",
 		label: "cmux Sidebar",
-		description: "Manage GUI sidebar status, progress, logs, custom sidebars, and right-sidebar visibility. TUI sidebar plugins remain available through cmux_cli.",
+		description: "Manage cmux GUI sidebar status, progress, logs, custom sidebars, and right-sidebar visibility.",
 		parameters: CmuxSidebarSchema,
 		async execute(_id, params: CmuxSidebarInput, signal) {
 			try {
 				const context = toolContext(env);
-				if (context.backend === "tui") throw new TypeError(`sidebar ${params.action} is not supported by cmux TUI; use cmux_cli plugin commands`);
 				return await executeCommand(`sidebar:${params.action}`, sidebarArgv(params, env), params.timeout_ms, signal, runner, context, { parseJson: true });
 			} catch (error) {
 				return failureResult(error instanceof Error ? error.message : "invalid sidebar action");

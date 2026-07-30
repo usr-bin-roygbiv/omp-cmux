@@ -11,7 +11,7 @@ import {
 	type TodoPhaseSnapshot,
 } from "./state.ts";
 
-const MAIN_STATUS_KEY = "omp_plugin";
+const MAIN_STATUS_PREFIX = "omp_plugin";
 const STATUS_PRIORITY = "100";
 const AGENT_STATUS_PRIORITY = "80";
 const TELEMETRY_INTERVAL_MS = 1_000;
@@ -179,13 +179,23 @@ function contextSessionId(ctx: ExtensionContext | undefined, eventSessionId?: un
 	}
 }
 
-function agentStatusKey(id: string): string {
-	const normalized = id.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);
-	return `omp_agent_${normalized || "unknown"}`;
+function scopedStatusKey(kind: "session" | "agent", surfaceId: string | undefined, agentId?: string): string {
+	const normalizedSurface = (surfaceId ?? "unknown").replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "unknown";
+	if (kind === "session") return `${MAIN_STATUS_PREFIX}_${normalizedSurface}`;
+	const normalizedAgent = (agentId ?? "unknown").replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "unknown";
+	return `omp_agent_${normalizedSurface}_${normalizedAgent}`;
 }
 
 function agentActivity(agent: SubagentSnapshot): string {
 	return agent.activity ? `${agent.name}: ${agent.activity}` : `${agent.name}: ${agent.status}`;
+}
+
+function workspaceStatusText(subagents: readonly SubagentSnapshot[], statusText: string): string {
+	let activeAgentCount = 1;
+	for (const agent of subagents) {
+		if (agent.status !== "completed" && agent.status !== "failed") activeAgentCount += 1;
+	}
+	return `${activeAgentCount} ${activeAgentCount === 1 ? "agent" : "agents"} · ${statusText}`;
 }
 
 function agentStyle(status: SubagentSnapshot["status"]): StatusStyle {
@@ -340,6 +350,7 @@ export function registerCmuxLifecycle(
 		try { workspaceArgs = exactTargetArgs({}, "workspace", targetEnv); } catch { workspaceArgs = undefined; }
 		try { surfaceArgs = exactTargetArgs({}, "surface", targetEnv); } catch { surfaceArgs = undefined; }
 	}
+	const mainStatusKey = scopedStatusKey("session", text(targetEnv.CMUX_SURFACE_ID));
 	let lastContext: ExtensionContext | undefined;
 	let rootActive = false;
 	let disposed = false;
@@ -389,11 +400,30 @@ export function registerCmuxLifecycle(
 		return tuiSurfaceDiscovery;
 	};
 
-	const enqueue = (args: string[], binary?: string, allowDisposed = false): void => {
+	const enqueue = (args: string[], binary?: string, allowDisposed = false, commandOptions: { stdin?: string; cwd?: string } = {}): void => {
 		if (!allowDisposed && disposed) return;
 		commandTail = commandTail.then(async () => {
-			await runner(args, { env: targetEnv, ...(binary ? { binary } : {}) });
+			await runner(args, { env: targetEnv, ...commandOptions, ...(binary ? { binary } : {}) });
 		}).catch(() => undefined);
+	};
+
+	const sendGuiHook = (subcommand: "session-start" | "prompt-submit" | "stop", ctx: ExtensionContext, extra: Record<string, unknown> = {}): void => {
+		if (backend !== "gui" || !workspaceArgs || !surfaceArgs) return;
+		const sessionId = contextSessionId(ctx);
+		if (!sessionId) return;
+		const eventName = subcommand === "session-start" ? "SessionStart" : subcommand === "prompt-submit" ? "UserPromptSubmit" : "Stop";
+		const cwd = text(ctx.cwd) ?? process.cwd();
+		enqueue(["hooks", "omp", subcommand], undefined, false, {
+			cwd,
+			stdin: JSON.stringify({ session_id: sessionId, cwd, hook_event_name: eventName, event: eventName, ...extra }),
+		});
+	};
+
+	const reportGuiStatus = (): void => {
+		if (!rootActive || backend !== "gui" || !workspaceArgs) return;
+		const snapshot = machine.snapshot;
+		const style = STATUS_STYLES[snapshot.status];
+		enqueue(["set-status", mainStatusKey, workspaceStatusText(snapshot.subagents, snapshot.statusText), "--icon", style.icon, "--color", style.color, "--priority", STATUS_PRIORITY, ...workspaceArgs]);
 	};
 
 	const enqueueTuiReport = (richArgs: string[], fallbackArgs: string[]): void => {
@@ -465,9 +495,7 @@ export function registerCmuxLifecycle(
 		if (!rootActive) return;
 		switch (effect.type) {
 			case "status": {
-				if (backend !== "gui" || !workspaceArgs) return;
-				const style = STATUS_STYLES[effect.status];
-				enqueue(["set-status", MAIN_STATUS_KEY, effect.text, "--icon", style.icon, "--color", style.color, "--priority", STATUS_PRIORITY, ...workspaceArgs]);
+				reportGuiStatus();
 				return;
 			}
 			case "todo": {
@@ -483,20 +511,22 @@ export function registerCmuxLifecycle(
 			}
 			case "subagent": {
 				if (backend !== "gui" || !workspaceArgs) return;
-				const key = agentStatusKey(effect.agent.id);
+				const key = scopedStatusKey("agent", text(targetEnv.CMUX_SURFACE_ID), effect.agent.id);
 				const isNew = !ownedAgentKeys.has(key);
 				ownedAgentKeys.add(key);
 				const style = agentStyle(effect.agent.status);
 				enqueue(["set-status", key, agentActivity(effect.agent), "--icon", style.icon, "--color", style.color, "--priority", AGENT_STATUS_PRIORITY, ...workspaceArgs]);
 				if (isNew) enqueue(["log", `${effect.agent.name} started`, ...workspaceArgs]);
+				reportGuiStatus();
 				return;
 			}
 			case "subagent-remove": {
 				if (backend !== "gui" || !workspaceArgs) return;
-				const key = agentStatusKey(effect.id);
+				const key = scopedStatusKey("agent", text(targetEnv.CMUX_SURFACE_ID), effect.id);
 				ownedAgentKeys.delete(key);
 				enqueue(["clear-status", key, ...workspaceArgs]);
 				enqueue(["log", `${effect.name} ${effect.status}`, ...workspaceArgs]);
+				reportGuiStatus();
 				return;
 			}
 			case "notify":
@@ -552,6 +582,7 @@ export function registerCmuxLifecycle(
 		startedAtMs = now();
 		promptGenerationBySession.clear();
 		lastTuiReport = undefined;
+		sendGuiHook("session-start", ctx);
 		dispatch({ type: "session-start" });
 		if (backend === "tui") await discoverTuiSurface();
 		reportTui();
@@ -568,6 +599,7 @@ export function registerCmuxLifecycle(
 			startTelemetry(ctx);
 			const sessionId = contextSessionId(ctx);
 			if (sessionId) promptGenerationBySession.set(sessionId, (promptGenerationBySession.get(sessionId) ?? 0) + 1);
+			sendGuiHook("prompt-submit", ctx, { prompt: text(record(event)?.prompt) });
 			dispatch({ type: "agent-start" });
 		}
 		return runtimeSystemPrompt(event, ctx, backend, runtimeMachine);
@@ -632,6 +664,7 @@ export function registerCmuxLifecycle(
 	on("agent_end", (event, ctx) => {
 		const outcome = assistantOutcome(event);
 		if (outcome.cancelled) dispatch({ type: "cancel" });
+		sendGuiHook("stop", ctx, { last_assistant_message: finalAssistantMessage(record(event)?.messages) });
 		dispatch({ type: "agent-end", pendingMessages: safeContextPending(ctx), isError: outcome.error });
 	});
 	on("session_stop", (event, ctx) => {
@@ -653,7 +686,7 @@ export function registerCmuxLifecycle(
 	const cleanupUi = (): void => {
 		stopTelemetry();
 		if (backend !== "gui" || !workspaceArgs) return;
-		enqueue(["clear-status", MAIN_STATUS_KEY, ...workspaceArgs], undefined, true);
+		enqueue(["clear-status", mainStatusKey, ...workspaceArgs], undefined, true);
 		enqueue(["clear-progress", ...workspaceArgs], undefined, true);
 		for (const key of ownedAgentKeys) enqueue(["clear-status", key, ...workspaceArgs], undefined, true);
 		ownedAgentKeys.clear();

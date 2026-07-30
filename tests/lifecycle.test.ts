@@ -96,7 +96,7 @@ function commands(calls: RunCall[], command: string): string[][] {
 }
 
 function rawMainStatuses(calls: RunCall[]): string[] {
-	return commands(calls, "set-status").filter(argv => argv[1] === "omp_plugin").map(argv => argv[2]!);
+	return commands(calls, "set-status").filter(argv => argv[1]?.startsWith("omp_plugin_")).map(argv => argv[2]!);
 }
 
 function mainStatuses(calls: RunCall[]): string[] {
@@ -150,6 +150,29 @@ describe("OMP lifecycle adapter", () => {
 			progress: { id: "agent-1", status: "completed" },
 		});
 		expect(rawMainStatuses(testHarness.calls).at(-1)).toBe("1 agent · Working");
+	});
+
+	test("bridges the root session through cmux OMP lifecycle hooks with exact GUI identity", async () => {
+		const testHarness = harness();
+		await testHarness.emit("session_start");
+		await testHarness.emit("before_agent_start", { prompt: "Implement lifecycle" });
+		await testHarness.emit("agent_end", { messages: [{ role: "assistant", content: "Finished." }] });
+
+		const hookCalls = testHarness.calls.filter(call => call.argv[0] === "hooks");
+		expect(hookCalls.map(call => call.argv)).toEqual([
+			["hooks", "omp", "session-start"],
+			["hooks", "omp", "prompt-submit"],
+			["hooks", "omp", "stop"],
+		]);
+		for (const call of hookCalls) {
+			expect(call.options.env).toMatchObject({
+				CMUX_WORKSPACE_ID: "workspace-test",
+				CMUX_SURFACE_ID: "surface-test",
+			});
+			const payload = JSON.parse(String(call.options.stdin)) as Record<string, unknown>;
+			expect(payload.session_id).toBe("session-test");
+			expect(payload.cwd).toBeTruthy();
+		}
 	});
 
 	test("routes every primary lifecycle status and only the two allowed notifications", async () => {
