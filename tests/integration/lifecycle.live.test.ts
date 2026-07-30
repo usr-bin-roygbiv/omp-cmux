@@ -6,6 +6,8 @@ import { registerCmuxLifecycle } from "../../plugins/cmux/src/lifecycle.ts";
 const workspaceId = process.env.CMUX_WORKSPACE_ID;
 const surfaceId = process.env.CMUX_SURFACE_ID;
 const liveTest = process.env.CMUX_LIFECYCLE_INTEGRATION === "1" && workspaceId && surfaceId ? test : test.skip;
+const statusSurface = (surfaceId ?? "unknown").replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "unknown";
+const mainStatusKey = `omp_plugin_${statusSurface}`;
 
 interface LiveContext {
 	hasUI: boolean;
@@ -88,36 +90,45 @@ liveTest(
 			const parsed = parseCmuxJson<unknown>(output);
 			return Array.isArray(parsed) ? (parsed as Array<Record<string, unknown>>) : [];
 		};
+		const initialNotificationIds = new Set<string>();
+		const notificationId = (item: Record<string, unknown>) => typeof item.id === "string" ? item.id : typeof item.notification_id === "string" ? item.notification_id : undefined;
+		for (const item of await listedNotifications()) {
+			const id = notificationId(item);
+			if (id) initialNotificationIds.add(id);
+		}
+		const newNotifications = (items: Array<Record<string, unknown>>) => items.filter(item => {
+			const id = notificationId(item);
+			return id !== undefined && !initialNotificationIds.has(id);
+		});
 		const waitForNotificationCount = async (title: string, expected: number) => {
 			for (let attempt = 0; attempt < 80; attempt += 1) {
-				const notifications = await listedNotifications();
+				const notifications = newNotifications(await listedNotifications());
 				if (notifications.filter(item => item.title === title).length === expected) return notifications;
 			}
 			throw new Error(`notification ${JSON.stringify(title)} never reached count ${expected}; failures=${JSON.stringify(lifecycleFailures)} commands=${JSON.stringify(lifecycleCommands.slice(-20))}`);
 		};
 
-		await command(["clear-notifications", "--workspace", workspaceId!]);
 		try {
 			await command(["set-status", "live-probe", "Visible", "--workspace", workspaceId!]);
 			await waitForSidebar("  live-probe=Visible");
 			await command(["clear-status", "live-probe", "--workspace", workspaceId!]);
 			await emit("session_start");
-			await waitForSidebar("  omp_plugin=Idle");
+			await waitForSidebar(`  ${mainStatusKey}=1 agent · Idle`);
 			await emit("before_agent_start");
-			await waitForSidebar("  omp_plugin=Working");
+			await waitForSidebar(`  ${mainStatusKey}=1 agent · Working`);
 			await emit("agent_start");
-			await waitForSidebar("  omp_plugin=Thinking");
+			await waitForSidebar(`  ${mainStatusKey}=1 agent · Thinking`);
 			await emit("tool_execution_start", { toolCallId: "read-1", toolName: "read" });
-			await waitForSidebar("  omp_plugin=Tool: read");
+			await waitForSidebar(`  ${mainStatusKey}=1 agent · Tool: read`);
 			await emit("tool_execution_end", { toolCallId: "read-1", toolName: "read", isError: false, result: {} });
 			await emit("auto_retry_start", { attempt: 1, maxAttempts: 3 });
-			await waitForSidebar("  omp_plugin=Retrying 1/3");
+			await waitForSidebar(`  ${mainStatusKey}=1 agent · Retrying 1/3`);
 			await emit("auto_retry_end", { success: true });
 			await emit("auto_compaction_start");
-			await waitForSidebar("  omp_plugin=Compacting");
+			await waitForSidebar(`  ${mainStatusKey}=1 agent · Compacting`);
 			await emit("auto_compaction_end", { aborted: false, willRetry: false });
 			await emit("tool_execution_start", { toolCallId: "ask-1", toolName: "ask" });
-			await waitForSidebar("  omp_plugin=Needs input");
+			await waitForSidebar(`  ${mainStatusKey}=1 agent · Needs input`);
 			await emit("tool_execution_start", { toolCallId: "ask-1", toolName: "ask" });
 			await emit("tool_execution_end", { toolCallId: "ask-1", toolName: "ask", isError: false, result: {} });
 
@@ -127,6 +138,7 @@ liveTest(
 				progress: { id: "agent-1", status: "running", currentTool: "edit" },
 			});
 			await waitForSidebar("WorkerOne: tool: edit");
+			await waitForSidebar(`  ${mainStatusKey}=2 agents · Thinking`);
 			await emit("tool_execution_start", { toolCallId: "todo-1", toolName: "todo" });
 			await emit("tool_execution_end", {
 				toolCallId: "todo-1",
@@ -148,15 +160,15 @@ liveTest(
 			});
 			await waitForSidebar("progress=0.50 Verification: Finish");
 			await emit("agent_end", { messages: [] });
-			await waitForSidebar("  omp_plugin=Waiting for 1 subagent");
-			expect((await listedNotifications()).filter(item => item.title === "OMP needs your input")).toHaveLength(1);
-			expect((await listedNotifications()).filter(item => item.title === "OMP turn complete")).toHaveLength(0);
+			await waitForSidebar(`  ${mainStatusKey}=2 agents · Waiting for 1 subagent`);
+			expect(newNotifications(await listedNotifications()).filter(item => item.title === "OMP needs your input")).toHaveLength(1);
+			expect(newNotifications(await listedNotifications()).filter(item => item.title === "OMP turn complete")).toHaveLength(0);
 
 			emitBus("task:subagent:progress", {
 				agent: "WorkerOne",
 				progress: { id: "agent-1", status: "completed" },
 			});
-			await waitForSidebar("  omp_plugin=Done");
+			await waitForSidebar(`  ${mainStatusKey}=1 agent · Done`);
 			await emit("session_stop", {
 				turn_id: 1,
 				session_id: "omp-cmux-gui-live-probe",
@@ -164,6 +176,12 @@ liveTest(
 				messages: [{ role: "assistant", content: "Probe complete." }],
 			});
 			await waitForNotificationCount("OMP turn complete", 1);
+			expect(lifecycleCommands.filter(args => args[0] === "hooks").map(args => args.slice(0, 3))).toEqual([
+				["hooks", "omp", "session-start"],
+				["hooks", "omp", "prompt-submit"],
+				["hooks", "omp", "stop"],
+			]);
+			expect(lifecycleFailures).toEqual([]);
 
 			await emit("before_agent_start");
 			await emit("message_end", { message: { role: "assistant", errorMessage: "provider failed" } });
@@ -174,7 +192,7 @@ liveTest(
 				stop_hook_active: false,
 				messages: [{ role: "assistant", errorMessage: "provider failed" }],
 			});
-			await waitForSidebar("  omp_plugin=Error");
+			await waitForSidebar(`  ${mainStatusKey}=1 agent · Error`);
 			const failed = await waitForNotificationCount("OMP turn failed", 1);
 
 			await emit("before_agent_start");
@@ -185,15 +203,18 @@ liveTest(
 				stop_hook_active: false,
 				messages: [{ role: "assistant", stopReason: "aborted" }],
 			});
-			await waitForSidebar("  omp_plugin=Stopped");
-			const stopped = await listedNotifications();
+			await waitForSidebar(`  ${mainStatusKey}=1 agent · Stopped`);
+			const stopped = newNotifications(await listedNotifications());
 			expect(stopped).toEqual(failed);
 		} finally {
 			await dispose();
 			const cleaned = await waitForSidebar("progress=none");
-			expect(cleaned).not.toContain("  omp_plugin=");
+			expect(cleaned).not.toContain(`  ${mainStatusKey}=`);
 			expect(cleaned).not.toContain("  omp_agent_");
-			await command(["clear-notifications", "--workspace", workspaceId!]);
+			for (const item of newNotifications(await listedNotifications())) {
+				const id = notificationId(item);
+				if (id) await command(["--json", "dismiss-notification", "--id", id]);
+			}
 		}
 	},
 	60_000,
