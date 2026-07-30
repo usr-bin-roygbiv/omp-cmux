@@ -401,7 +401,7 @@ export function registerCmuxLifecycle(
 		return tuiSurfaceDiscovery;
 	};
 
-	const enqueue = (args: string[], binary?: string, allowDisposed = false, commandOptions: { stdin?: string; cwd?: string } = {}): void => {
+	const enqueue = (args: string[], binary?: string, allowDisposed = false, commandOptions: { stdin?: string; cwd?: string; disableHooks?: boolean } = {}): void => {
 		if (!allowDisposed && disposed) return;
 		commandTail = commandTail.then(async () => {
 			await runner(args, { env: targetEnv, ...commandOptions, ...(binary ? { binary } : {}) });
@@ -570,7 +570,7 @@ export function registerCmuxLifecycle(
 			enqueue(["notify", "--title", presentation.title, "--body", contextualBody, "--level", presentation.level, "--surface", tuiSurface], tuiBinary);
 			return;
 		}
-		if (surfaceArgs) enqueue(["notify", "--title", presentation.title, "--subtitle", `${presentation.subtitle} · ${contextLabel}`, "--body", contextualBody, ...surfaceArgs]);
+		if (surfaceArgs) enqueue(["notify", "--title", presentation.title, "--subtitle", `${presentation.subtitle} · ${contextLabel}`, "--body", contextualBody, ...surfaceArgs], undefined, false, { disableHooks: false });
 	};
 
 	const on = (event: string, handler: (event: any, ctx: ExtensionContext) => void | Promise<void>): void => {
@@ -668,7 +668,6 @@ export function registerCmuxLifecycle(
 	on("agent_end", (event, ctx) => {
 		const outcome = assistantOutcome(event);
 		if (outcome.cancelled) dispatch({ type: "cancel" });
-		sendGuiHook("stop", ctx, { last_assistant_message: finalAssistantMessage(record(event)?.messages) });
 		dispatch({ type: "agent-end", pendingMessages: safeContextPending(ctx), isError: outcome.error });
 	});
 	on("session_stop", (event, ctx) => {

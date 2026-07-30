@@ -57,6 +57,8 @@ export interface CmuxRunOptions {
 	cwd?: string;
 	/** Environment source. Only the fixed allowlist is inherited by the child. */
 	env?: NodeJS.ProcessEnv;
+	/** Keep native cmux OMP hooks enabled for commands such as semantic notification delivery. */
+	disableHooks?: boolean;
 	/** Test seam; production callers should use the default direct process spawner. */
 	spawn?: typeof nodeSpawn;
 	/** Test seam; production callers should use the current Node platform. */
@@ -170,14 +172,15 @@ export function resolveCmuxBinary(
 export function buildSafeEnvironment(
 	source: NodeJS.ProcessEnv = process.env,
 	overrides: NodeJS.ProcessEnv = {},
+	disableHooks = true,
 ): NodeJS.ProcessEnv {
 	const safe: NodeJS.ProcessEnv = {};
 	for (const key of SAFE_ENVIRONMENT_KEYS) {
 		const value = overrides[key] ?? source[key];
 		if (value !== undefined && !value.includes("\0")) safe[key] = value;
 	}
-	// Prevent cmux from also running legacy OMP hooks for operations initiated here.
-	safe.CMUX_OMP_HOOKS_DISABLED = "1";
+	// Prevent cmux from also running legacy OMP hooks unless the command intentionally delivers one.
+	if (disableHooks) safe.CMUX_OMP_HOOKS_DISABLED = "1";
 	return safe;
 }
 
@@ -329,7 +332,7 @@ export async function runCmux(args: readonly string[], options: CmuxRunOptions =
 		try {
 			child = spawnImpl(binary, [...args], {
 				cwd: options.cwd,
-				env: buildSafeEnvironment(options.env ?? process.env),
+				env: buildSafeEnvironment(options.env ?? process.env, {}, options.disableHooks !== false),
 				stdio: ["pipe", "pipe", "pipe"],
 				shell: false,
 				windowsHide: true,

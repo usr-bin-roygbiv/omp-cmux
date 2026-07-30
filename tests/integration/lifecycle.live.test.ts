@@ -52,6 +52,7 @@ liveTest(
 			},
 		};
 		const targetEnv: NodeJS.ProcessEnv = { ...process.env };
+		targetEnv.PI_MACHINE_NAME = `gui-live-probe-${process.pid}`;
 		const lifecycleCommands: string[][] = [];
 		const lifecycleFailures: string[] = [];
 		const lifecycleCompletions: string[] = [];
@@ -161,7 +162,7 @@ liveTest(
 			await waitForSidebar("progress=0.50 Verification: Finish");
 			await emit("agent_end", { messages: [] });
 			await waitForSidebar(`  ${mainStatusKey}=2 agents · Waiting for 1 subagent`);
-			expect(newNotifications(await listedNotifications()).filter(item => item.title === "OMP needs your input")).toHaveLength(1);
+			await waitForNotificationCount("OMP needs your input", 1);
 			expect(newNotifications(await listedNotifications()).filter(item => item.title === "OMP turn complete")).toHaveLength(0);
 
 			emitBus("task:subagent:progress", {
@@ -193,7 +194,8 @@ liveTest(
 				messages: [{ role: "assistant", errorMessage: "provider failed" }],
 			});
 			await waitForSidebar(`  ${mainStatusKey}=1 agent · Error`);
-			const failed = await waitForNotificationCount("OMP turn failed", 1);
+			await waitForNotificationCount("OMP turn failed", 1);
+			const notificationCountAfterFailure = lifecycleCommands.filter(args => args[0] === "notify").length;
 
 			await emit("before_agent_start");
 			await emit("agent_end", { messages: [{ role: "assistant", stopReason: "aborted" }] });
@@ -204,8 +206,7 @@ liveTest(
 				messages: [{ role: "assistant", stopReason: "aborted" }],
 			});
 			await waitForSidebar(`  ${mainStatusKey}=1 agent · Stopped`);
-			const stopped = newNotifications(await listedNotifications());
-			expect(stopped).toEqual(failed);
+			expect(lifecycleCommands.filter(args => args[0] === "notify")).toHaveLength(notificationCountAfterFailure);
 		} finally {
 			await dispose();
 			const cleaned = await waitForSidebar("progress=none");

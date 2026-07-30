@@ -173,6 +173,10 @@ describe("OMP lifecycle adapter", () => {
 		await testHarness.emit("session_start");
 		await testHarness.emit("before_agent_start", { prompt: "Implement lifecycle" });
 		await testHarness.emit("agent_end", { messages: [{ role: "assistant", content: "Finished." }] });
+		expect(testHarness.calls.filter(call => call.argv[0] === "hooks").map(call => call.argv)).toEqual([
+			["hooks", "omp", "session-start"],
+			["hooks", "omp", "prompt-submit"],
+		]);
 		await testHarness.emit("session_stop", {
 			turn_id: 1,
 			session_id: "session-test",
@@ -338,6 +342,8 @@ describe("OMP lifecycle adapter", () => {
 				continue;
 			}
 			expect(sent).toHaveLength(1);
+			const notificationCall = testHarness.calls.find(call => call.argv === sent[0]);
+			expect(notificationCall?.options).toMatchObject({ disableHooks: false });
 			expect(sent[0]).toContain(scenario.title);
 			expect(sent[0]).toContain(`${scenario.subtitle} · test-host · GUI`);
 			const statusIndex = lastCommandIndex(testHarness.calls, call => call.argv[0] === "set-status" && call.argv[1] === "omp_plugin_surface-test");
