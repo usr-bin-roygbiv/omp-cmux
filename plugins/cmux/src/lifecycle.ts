@@ -2,6 +2,7 @@ import { hostname as systemHostname } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
 import { exactTargetArgs, parseCmuxJson, runCmux } from "./cmux.ts";
+import { forwardSshDesktopNotification } from "./ssh-notifications.ts";
 import {
 	LifecycleStateMachine,
 	type LifecycleAction,
@@ -312,6 +313,7 @@ export function registerCmuxLifecycle(
 		pid?: number;
 		ppid?: number;
 		hostname?: () => string;
+		forwardSshNotification?: typeof forwardSshDesktopNotification;
 	} = {},
 ): () => Promise<void> {
 	const looseApi = api as unknown as ExtensionApiLike;
@@ -323,6 +325,7 @@ export function registerCmuxLifecycle(
 	const promptGenerationBySession = new Map<string, number>();
 	const runner = options.run ?? runCmux;
 	const targetEnv: NodeJS.ProcessEnv = { ...(options.env ?? process.env) };
+	const forwardSshNotification = options.forwardSshNotification ?? forwardSshDesktopNotification;
 	const now = options.now ?? Date.now;
 	const tuiRequested = Boolean(text(targetEnv.CMUX_TUI_SOCKET));
 	const rawTuiSurface = text(targetEnv.CMUX_TUI_SURFACE_ID);
@@ -498,6 +501,14 @@ export function registerCmuxLifecycle(
 		const contextualBody = `${presentation.body}\n\nSession: ${contextLabel}`;
 		if (backend === "tui" && tuiSurface) {
 			enqueue(["notify", "--title", presentation.title, "--body", contextualBody, "--level", presentation.level, "--surface", tuiSurface], tuiBinary);
+			try {
+				forwardSshNotification(
+					{ title: presentation.title, body: `${REMOTE_MESSAGES[kind]}\n\nSession: ${contextLabel}` },
+					{ env: targetEnv },
+				);
+			} catch {
+				// The native TUI notification remains authoritative when the outer SSH TTY is unavailable.
+			}
 			return;
 		}
 		if (surfaceArgs) enqueue(["notify", "--title", presentation.title, "--subtitle", `${presentation.subtitle} · ${contextLabel}`, "--body", contextualBody, ...surfaceArgs]);
