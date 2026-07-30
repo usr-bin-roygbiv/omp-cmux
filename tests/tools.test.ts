@@ -486,11 +486,10 @@ describe("typed cmux argv translation", () => {
 		]);
 	});
 
-	test("fails closed before execution when no complete cmux route is available", async () => {
+	test("registers no tools when no complete cmux route is available", () => {
 		const harness = toolHarness(commandResult(), {});
-		const result = await execute(harness, "cmux_surface", { action: "close" });
+		expect([...harness.tools.keys()]).toEqual([]);
 		expect(harness.calls).toEqual([]);
-		expect(result).toMatchObject({ isError: true, details: { operation: "validation" } });
-		expect(result.content[0]!.text).toMatch(/no cmux GUI or TUI route is available/i);
 	});
+
 });

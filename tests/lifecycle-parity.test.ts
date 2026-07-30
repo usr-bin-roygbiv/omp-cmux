@@ -259,6 +259,24 @@ describe("TUI lifecycle backend", () => {
 		await harness.dispose();
 	});
 
+	test("rejects an invalid injected TUI surface before lifecycle mutation", async () => {
+		const harness = lifecycleHarness(
+			{ PATH: process.env.PATH, CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock", CMUX_TUI_SURFACE_ID: "0" },
+			{
+				runResult(argv) {
+					if (argv[0] === "ids") return okResult(JSON.stringify({ ids: [] }));
+					return okResult();
+				},
+			},
+		);
+
+		await harness.emit("session_start");
+		await flush(harness);
+		expect(tuiCalls(harness, "report-agent")).toEqual([]);
+		await harness.dispose();
+	});
+
+
 	test("gates all lifecycle effects to the root UI and owns one timer cleared on stop and shutdown", async () => {
 		const harness = lifecycleHarness(
 			{ PATH: process.env.PATH, CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock", CMUX_TUI_SURFACE_ID: "9" },

@@ -341,7 +341,7 @@ export function registerCmuxLifecycle(
 	const now = options.now ?? Date.now;
 	const tuiRequested = Boolean(text(targetEnv.CMUX_TUI_SOCKET));
 	const rawTuiSurface = text(targetEnv.CMUX_TUI_SURFACE_ID);
-	let tuiSurface = rawTuiSurface && /^\d+$/.test(rawTuiSurface) ? rawTuiSurface : undefined;
+	let tuiSurface = rawTuiSurface && /^[1-9][0-9]*$/.test(rawTuiSurface) ? rawTuiSurface : undefined;
 	const backend: CmuxBackend = tuiRequested ? "tui" : "gui";
 	const runtimeMachine = machineName(targetEnv, options.hostname ?? systemHostname);
 	let workspaceArgs: string[] | undefined;
@@ -356,6 +356,7 @@ export function registerCmuxLifecycle(
 	let disposed = false;
 	let telemetryTimer: Timer | undefined;
 	let startedAtMs: number | undefined;
+	let guiTurnHookActive = false;
 
 	let lastTuiReport: string | undefined;
 	let commandTail = Promise.resolve();
@@ -409,6 +410,7 @@ export function registerCmuxLifecycle(
 
 	const sendGuiHook = (subcommand: "session-start" | "prompt-submit" | "stop", ctx: ExtensionContext, extra: Record<string, unknown> = {}): void => {
 		if (backend !== "gui" || !workspaceArgs || !surfaceArgs) return;
+		if (subcommand === "stop" && !guiTurnHookActive) return;
 		const sessionId = contextSessionId(ctx);
 		if (!sessionId) return;
 		const eventName = subcommand === "session-start" ? "SessionStart" : subcommand === "prompt-submit" ? "UserPromptSubmit" : "Stop";
@@ -417,6 +419,8 @@ export function registerCmuxLifecycle(
 			cwd,
 			stdin: JSON.stringify({ session_id: sessionId, cwd, hook_event_name: eventName, event: eventName, ...extra }),
 		});
+		if (subcommand === "session-start") guiTurnHookActive = false;
+		else guiTurnHookActive = subcommand === "prompt-submit";
 	};
 
 	const reportGuiStatus = (): void => {
@@ -668,6 +672,7 @@ export function registerCmuxLifecycle(
 		dispatch({ type: "agent-end", pendingMessages: safeContextPending(ctx), isError: outcome.error });
 	});
 	on("session_stop", (event, ctx) => {
+		sendGuiHook("stop", ctx, { last_assistant_message: event.last_assistant_message ?? finalAssistantMessage(event.messages) });
 		if (!rootActive) return;
 		stopTelemetry();
 		const settlement = classifyFinalSettlement(event.last_assistant_message ?? finalAssistantMessage(event.messages));
@@ -692,8 +697,9 @@ export function registerCmuxLifecycle(
 		ownedAgentKeys.clear();
 	};
 
-	on("session_shutdown", async () => {
+	on("session_shutdown", async (_event, ctx) => {
 		if (!rootActive) return;
+		sendGuiHook("stop", ctx);
 		dispatch({ type: "shutdown" });
 		cleanupUi();
 		rootActive = false;
@@ -725,6 +731,8 @@ export function registerCmuxLifecycle(
 			await commandTail;
 			return;
 		}
+		if (lastContext) sendGuiHook("stop", lastContext);
+
 		for (const unsubscribe of unsubscribers.splice(0)) {
 			try { unsubscribe(); } catch { /* extension teardown must not disturb OMP */ }
 		}

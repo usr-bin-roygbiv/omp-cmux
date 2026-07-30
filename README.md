@@ -31,20 +31,20 @@ omp plugin install --force github:usr-bin-roygbiv/omp-cmux
 
 ## Tools
 
-The plugin detects one backend for every tool call. `CMUX_TUI_SOCKET` selects TUI before any GUI variables; GUI requires both `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`; incomplete and unavailable routes fail closed.
+The plugin detects one backend at registration time. `CMUX_TUI_SOCKET` selects TUI before any GUI variables; GUI requires both `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`; incomplete and unavailable routes fail closed without registering unusable tools. Registration is backend-scoped: unsupported tools and actions are omitted from the model-visible surface rather than exposed as predictable failures.
 
-Five typed tools cover common operations with exact targets:
+GUI registers five typed tools for common operations; TUI registers the four tools backed by its CLI and narrows each schema to supported actions:
 
 - `cmux_workspace` — list, create, close, and rename workspaces in both backends, plus the complete GUI workspace action set.
 - `cmux_surface` — create, split, inspect, read, control, resume, and close GUI surfaces; TUI maps its supported subset to `list-workspaces`, `new-tab`, `split`, `read-screen`, `read-scrollback`, `send`, `send-key`, and `close-surface`.
 - `cmux_browser` — complete GUI WKWebView command coverage and exact TUI browser-tab creation through `new-browser-tab`. TUI does not expose GUI selector/DOM automation.
 - `cmux_notification` — native notifications in both backends; GUI additionally supports listing, dismissal, read state, opening, jumping, and clearing.
-- `cmux_sidebar` — GUI status, progress, logs, custom sidebars, and right-sidebar visibility. TUI sidebar plugins remain available through the raw CLI.
+- `cmux_sidebar` — GUI-only status, progress, logs, custom sidebars, and right-sidebar visibility. It is not registered in TUI; TUI sidebar plugins remain available through the raw CLI.
 
-Three escape hatches preserve access to the complete, evolving source contracts:
+GUI registers three escape hatches; TUI registers the two backed by its CLI:
 
 - `cmux_capabilities` runs GUI capability discovery or TUI `--json identify`, then includes the detected backend and compact source-derived GUI command or TUI CLI/protocol inventories in the model-visible result.
-- `cmux_rpc` invokes arbitrary GUI JSON-RPC methods. It rejects TUI calls before execution because the TUI has no JSON-RPC endpoint.
+- `cmux_rpc` invokes arbitrary GUI JSON-RPC methods. It is not registered in TUI because the TUI has no JSON-RPC endpoint.
 - `cmux_cli` runs an explicit argument vector against the detected backend binary without a shell. It covers every source-listed GUI command and every TUI CLI verb, including future commands before a typed mapping exists.
 
 Each tool returns readable content plus structured details. Failures are reported as tool errors, cancellation stops the child process, and captured output is bounded.
@@ -62,9 +62,10 @@ Prefer typed tools. For unavoidable GUI `cmux_cli` calls, use top-level `read-sc
 
 ## Lifecycle synchronization
 
-GUI cmux status follows OMP through `idle`, `working`, `thinking`, `tool`, `needs-input`, `retrying`, `compacting`, `waiting`, `done`, `error`, and `stopped`. Tool status includes the active tool name. Ask gates publish `Needs input`, flash the originating surface, and only then send the decision notification; resolving the matching Ask restores the derived lifecycle status. Todo results mirror phase and item progress, while active task subagents appear by agent name and activity.
+GUI cmux status follows OMP through `idle`, `working`, `thinking`, `tool`, `needs-input`, `retrying`, `compacting`, `waiting`, `done`, `error`, and `stopped`. The native `cmux hooks omp session-start|prompt-submit|stop` bridge keeps cmux's built-in OMP lifecycle current for the exact captured workspace and surface. A separate surface-scoped workspace status reports the root plus every nonterminal task subagent as `N agents · <status>`; active task subagents also appear by agent name and activity. Tool status includes the active tool name. Ask gates publish `Needs input`, flash the originating surface, and only then send the decision notification; resolving the matching Ask restores the derived lifecycle status. Todo results mirror phase and item progress. Session stop or plugin disposal closes an outstanding native lifecycle and clears only the plugin's scoped status.
 
 In cmux TUI, lifecycle state is sent to the numeric injected surface with exactly one authoritative OMP record. On protocol 12, the plugin sets the structured `root_session` flag and includes lifecycle detail, elapsed start time, todo progress, running jobs, and the active-agent total; subagent activity is folded into that root record and never creates another record or notification. If the richer report is rejected, the plugin caches a protocol-10-compatible fallback for that process using only surface, state, source, and optional session, so the fleet can adopt the plugin before upgrading cmux TUI.
+
 
 Native backend notifications are emitted for:
 

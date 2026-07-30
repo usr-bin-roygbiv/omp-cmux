@@ -53,6 +53,10 @@ const TUI_ENV: NodeJS.ProcessEnv = {
 	CMUX_OMP_BINARY: "cmux-gui-must-not-win",
 };
 
+const EXPECTED_GUI_BINARY = process.platform === "darwin"
+	? "/Applications/cmux.app/Contents/Resources/bin/cmux"
+	: "cmux-gui-test";
+
 function commandResult(overrides: Partial<CmuxCommandResult> = {}): CmuxCommandResult {
 	return {
 		ok: true,
@@ -112,7 +116,7 @@ describe("backend detection and binary routing", () => {
 
 	test("resolves only the binary for the detected backend", () => {
 		expect(resolveCmuxBackendBinary("tui", TUI_ENV)).toBe("cmux-tui-test");
-		expect(resolveCmuxBackendBinary("gui", GUI_ENV)).toBe("cmux-gui-test");
+		expect(resolveCmuxBackendBinary("gui", GUI_ENV)).toBe(EXPECTED_GUI_BINARY);
 	});
 });
 
@@ -145,7 +149,7 @@ describe("source-derived total command coverage", () => {
 			expect(result.isError, action).toBe(false);
 		}
 		expect(harness.calls).toHaveLength(actions.length);
-		expect(harness.calls.every(call => call.options.binary === "cmux-gui-test")).toBe(true);
+		expect(harness.calls.every(call => call.options.binary === EXPECTED_GUI_BINARY)).toBe(true);
 	});
 
 	test("routes every source-listed command through the backend-specific raw CLI escape hatch", async () => {
@@ -159,7 +163,7 @@ describe("source-derived total command coverage", () => {
 				expect(result.isError, `${backend}:${command}`).toBe(false);
 			}
 			expect(harness.calls.map(call => call.argv[0])).toEqual([...commands]);
-			expect(harness.calls.every(call => call.options.binary === (backend === "tui" ? "cmux-tui-test" : "cmux-gui-test"))).toBe(true);
+			expect(harness.calls.every(call => call.options.binary === (backend === "tui" ? "cmux-tui-test" : EXPECTED_GUI_BINARY))).toBe(true);
 		}
 	});
 });
@@ -194,6 +198,12 @@ describe("TUI-aware typed tools", () => {
 		const workspaceId = schema.properties.workspace_id.description;
 		expect(workspaceId).toMatch(/TUI[^.]*numeric[^.]*(?:workspace_id|CMUX_TUI_WORKSPACE_ID)/u);
 		expect(workspaceId).toMatch(/never[^.]*focused/iu);
+	});
+
+	test("registers no unsupported tools when no backend route is active", () => {
+		const harness = toolHarness({ PATH: "/tools" });
+		expect([...harness.tools.keys()]).toEqual([]);
+		expect(harness.calls).toEqual([]);
 	});
 
 	test("registers only tools and actions supported by the active backend", async () => {

@@ -145,9 +145,25 @@ describe("OMP lifecycle adapter", () => {
 		});
 		expect(rawMainStatuses(testHarness.calls).at(-1)).toBe("2 agents · Working");
 
+		await testHarness.emitBus("task:subagent:lifecycle", {
+			id: "agent-2",
+			name: "WorkerTwo",
+			status: "parked",
+			description: "waiting for review",
+		});
+		expect(rawMainStatuses(testHarness.calls).at(-1)).toBe("3 agents · Working");
+		expect(commands(testHarness.calls, "set-status").some(argv => argv[2] === "WorkerTwo: waiting for review")).toBe(true);
+
 		await testHarness.emitBus("task:subagent:progress", {
 			agent: "WorkerOne",
-			progress: { id: "agent-1", status: "completed" },
+			progress: { id: "agent-1", status: "failed" },
+		});
+		expect(rawMainStatuses(testHarness.calls).at(-1)).toBe("2 agents · Working");
+
+		await testHarness.emitBus("task:subagent:lifecycle", {
+			id: "agent-2",
+			name: "WorkerTwo",
+			status: "completed",
 		});
 		expect(rawMainStatuses(testHarness.calls).at(-1)).toBe("1 agent · Working");
 	});
@@ -157,6 +173,12 @@ describe("OMP lifecycle adapter", () => {
 		await testHarness.emit("session_start");
 		await testHarness.emit("before_agent_start", { prompt: "Implement lifecycle" });
 		await testHarness.emit("agent_end", { messages: [{ role: "assistant", content: "Finished." }] });
+		await testHarness.emit("session_stop", {
+			turn_id: 1,
+			session_id: "session-test",
+			stop_hook_active: false,
+			messages: [{ role: "assistant", content: "Finished." }],
+		});
 
 		const hookCalls = testHarness.calls.filter(call => call.argv[0] === "hooks");
 		expect(hookCalls.map(call => call.argv)).toEqual([
@@ -173,6 +195,24 @@ describe("OMP lifecycle adapter", () => {
 			expect(payload.session_id).toBe("session-test");
 			expect(payload.cwd).toBeTruthy();
 		}
+	});
+
+	test("stops the native GUI lifecycle from session_stop when agent_end is absent", async () => {
+		const testHarness = harness();
+		await testHarness.emit("session_start");
+		await testHarness.emit("before_agent_start", { prompt: "Implement lifecycle" });
+		await testHarness.emit("session_stop", {
+			turn_id: 1,
+			session_id: "session-test",
+			stop_hook_active: false,
+			messages: [{ role: "assistant", content: "Finished." }],
+		});
+
+		expect(testHarness.calls.filter(call => call.argv[0] === "hooks").map(call => call.argv)).toEqual([
+			["hooks", "omp", "session-start"],
+			["hooks", "omp", "prompt-submit"],
+			["hooks", "omp", "stop"],
+		]);
 	});
 
 	test("routes every primary lifecycle status and only the two allowed notifications", async () => {
@@ -222,8 +262,8 @@ describe("OMP lifecycle adapter", () => {
 		const decisionIndex = testHarness.calls.findIndex(call => call.argv.includes("OMP needs your input"));
 		expect(testHarness.calls[decisionIndex - 2]?.argv).toEqual([
 			"set-status",
-			"omp_plugin",
-			"Needs input",
+			"omp_plugin_surface-test",
+			"1 agent · Needs input",
 			"--icon",
 			"questionmark.circle",
 			"--color",
@@ -241,6 +281,7 @@ describe("OMP lifecycle adapter", () => {
 			"surface-test",
 		]);
 	});
+
 
 	test("settles final GUI status and notification from session_stop without requiring agent_end", async () => {
 		const cases = [
@@ -299,7 +340,8 @@ describe("OMP lifecycle adapter", () => {
 			expect(sent).toHaveLength(1);
 			expect(sent[0]).toContain(scenario.title);
 			expect(sent[0]).toContain(`${scenario.subtitle} · test-host · GUI`);
-			const statusIndex = lastCommandIndex(testHarness.calls, call => call.argv[0] === "set-status" && call.argv[1] === "omp_plugin");
+			const statusIndex = lastCommandIndex(testHarness.calls, call => call.argv[0] === "set-status" && call.argv[1] === "omp_plugin_surface-test");
+
 			const notificationIndex = lastCommandIndex(testHarness.calls, call => call.argv[0] === "notify");
 			expect(statusIndex).toBeLessThan(notificationIndex);
 		}
@@ -381,7 +423,8 @@ describe("OMP lifecycle adapter", () => {
 
 		await testHarness.emit("session_shutdown");
 		const cleared = commands(testHarness.calls, "clear-status");
-		expect(cleared).toContainEqual(["clear-status", "omp_plugin", "--workspace", "workspace-test"]);
+		expect(cleared).toContainEqual(["clear-status", "omp_plugin_surface-test", "--workspace", "workspace-test"]);
+
 		expect(commands(testHarness.calls, "clear-progress")).toContainEqual([
 			"clear-progress",
 			"--workspace",
@@ -389,6 +432,24 @@ describe("OMP lifecycle adapter", () => {
 		]);
 		expect(commands(testHarness.calls, "clear-log")).toHaveLength(0);
 	});
+
+	test("stops native GUI lifecycle and clears scoped status on disposal", async () => {
+		const testHarness = harness();
+		await testHarness.emit("session_start");
+		await testHarness.emit("before_agent_start", { prompt: "Dispose active turn" });
+		await testHarness.emitBus("task:subagent:progress", {
+			agent: "WorkerOne",
+			progress: { id: "agent-1", status: "running", currentTool: "edit" },
+		});
+
+		await testHarness.dispose();
+		const hookCommands = testHarness.calls.filter(call => call.argv[0] === "hooks").map(call => call.argv);
+		expect(hookCommands.at(-1)).toEqual(["hooks", "omp", "stop"]);
+		const cleared = commands(testHarness.calls, "clear-status");
+		expect(cleared).toContainEqual(["clear-status", "omp_plugin_surface-test", "--workspace", "workspace-test"]);
+		expect(cleared).toContainEqual(["clear-status", "omp_agent_surface-test_agent-1", "--workspace", "workspace-test"]);
+	});
+
 
 	test("fails closed when cmux routing identity is unavailable", async () => {
 		const calls: string[][] = [];

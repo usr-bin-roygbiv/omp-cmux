@@ -575,10 +575,11 @@ function actionSubsetSchema(schema: unknown, actions: readonly string[]): unknow
 export function registerCmuxTools(api: ExtensionAPI, options: { run?: Runner; env?: NodeJS.ProcessEnv } = {}): void {
 	const runner = options.run ?? runCmux;
 	const env = options.env ?? process.env;
-	let registeredBackend: CmuxBackend | undefined;
-	try { registeredBackend = detectCmuxBackend(env); } catch { registeredBackend = undefined; }
+	let registeredBackend: CmuxBackend;
+	try { registeredBackend = detectCmuxBackend(env); } catch { return; }
 	const isTuiBackend = registeredBackend === "tui";
-	const activeBackendLabel = isTuiBackend ? "cmux TUI" : registeredBackend === "gui" ? "cmux GUI" : "the detected cmux backend";
+	const activeBackendLabel = isTuiBackend ? "cmux TUI" : "cmux GUI";
+
 
 	registerTool(api, {
 		name: "cmux_capabilities",
