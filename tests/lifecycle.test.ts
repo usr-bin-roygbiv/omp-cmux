@@ -97,13 +97,11 @@ function harness(options: { summaryGenerator?: SummaryGenerator } = {}) {
 		},
 		async emit(event: string, payload: unknown = { type: event }) {
 			for (const handler of handlers.get(event) ?? []) await handler(payload, context);
-			await Promise.resolve();
-			await Promise.resolve();
+			for (let index = 0; index < 32; index += 1) await Promise.resolve();
 		},
 		async emitBus(channel: string, payload: unknown) {
 			for (const handler of busHandlers.get(channel) ?? []) handler(payload);
-			await Promise.resolve();
-			await Promise.resolve();
+			for (let index = 0; index < 32; index += 1) await Promise.resolve();
 		},
 	};
 }
@@ -240,8 +238,7 @@ describe("OMP lifecycle adapter", () => {
 		});
 		await testHarness.emit("session_start");
 		await testHarness.emit("before_agent_start", { prompt: "Implement compact grouped agent cards" });
-		await Promise.resolve();
-		await Promise.resolve();
+		for (let index = 0; index < 32; index += 1) await Promise.resolve();
 
 		expect(request).toMatchObject({
 			model: "openai-codex/gpt-5.6-luna",
@@ -575,8 +572,7 @@ describe("OMP lifecycle adapter", () => {
 				clearTimer: () => undefined,
 			},
 		);
-		await Promise.resolve();
-		await Promise.resolve();
+		for (let index = 0; index < 32; index += 1) await Promise.resolve();
 		expect(calls).toEqual([]);
 	});
 });
