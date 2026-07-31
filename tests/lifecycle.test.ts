@@ -146,7 +146,7 @@ describe("OMP lifecycle adapter", () => {
 		expect(notifications(testHarness.calls)[0]).toContain("OMP turn complete");
 	});
 
-	test("groups every workspace agent into five compact status rows", async () => {
+	test("fits all five workspace states within the four-line sidebar budget", async () => {
 		const testHarness = harness();
 		await testHarness.emit("session_start");
 		await testHarness.emit("before_agent_start", { prompt: "Coordinate parser delivery" });
@@ -176,18 +176,20 @@ describe("OMP lifecycle adapter", () => {
 				.filter(argv => argv[1]?.startsWith("omp_group_surface-test_"))
 				.map(argv => [argv[1]!, argv]),
 		);
-		expect([...latest.entries()].map(([key, argv]) => [key, argv[2], argv[argv.indexOf("--color") + 1], argv[argv.indexOf("--format") + 1]])).toEqual([
-			["omp_group_surface-test_running", "Running 2 · OMP, WorkerOne", "#7AA2F7", "markdown"],
-			["omp_group_surface-test_blocked", "Blocked 1 · WorkerTwo", "#E0AF68", "markdown"],
-			["omp_group_surface-test_completed", "Completed 1 · Finisher", "#9ECE6A", "markdown"],
-			["omp_group_surface-test_decision", "Needs decision 0", "#BB9AF7", "markdown"],
-			["omp_group_surface-test_errored", "Errored 1 · Builder", "#F7768E", "markdown"],
+		expect([...latest.entries()].map(([key, argv]) => [key, argv[2], argv[argv.indexOf("--color") + 1], argv.includes("--format")])).toEqual([
+			["omp_group_surface-test_counts", "Run 2 · Block 1 · Done 1 · Ask 0 · Err 1", "#7AA2F7", false],
 		]);
+		const ownedStatusKeys = new Set(
+			commands(testHarness.calls, "set-status")
+				.map(argv => argv[1]!)
+				.filter(key => key.startsWith("omp_plugin_") || key.startsWith("omp_group_")),
+		);
+		expect([...ownedStatusKeys].sort()).toEqual(["omp_group_surface-test_counts", "omp_plugin_surface-test"]);
 		expect(commands(testHarness.calls, "set-status").some(argv => argv[1]?.startsWith("omp_agent_"))).toBe(false);
 
 		await testHarness.emit("tool_execution_start", { toolCallId: "ask-1", toolName: "ask" });
-		const decisionRows = commands(testHarness.calls, "set-status").filter(argv => argv[1] === "omp_group_surface-test_decision");
-		expect(decisionRows.at(-1)?.[2]).toBe("Needs decision 1 · OMP");
+		const countRows = commands(testHarness.calls, "set-status").filter(argv => argv[1] === "omp_group_surface-test_counts");
+		expect(countRows.at(-1)?.[2]).toBe("Run 1 · Block 1 · Done 1 · Ask 1 · Err 1");
 	});
 
 	test("aggregates root Todo and all subagent tasks in the workspace taskbar", async () => {
@@ -222,13 +224,13 @@ describe("OMP lifecycle adapter", () => {
 			"set-progress",
 			"0.3333",
 			"--label",
-			"Tasks 2/6 · 2 running · 1 error",
+			"Tasks 2/6 · 2 run · 1 err",
 			"--workspace",
 			"workspace-test",
 		]);
 	});
 
-	test("uses configured Codex Luna for a strictly bounded workspace title", async () => {
+	test("uses configured Codex Luna for a brief plain-text workspace title", async () => {
 		let request: SummaryRequest | undefined;
 		const testHarness = harness({
 			summaryGenerator: async value => {
@@ -242,15 +244,15 @@ describe("OMP lifecycle adapter", () => {
 
 		expect(request).toMatchObject({
 			model: "openai-codex/gpt-5.6-luna",
-			maxChars: 64,
+			maxChars: 32,
 		});
-		expect(request?.systemPrompt).toContain("64 Unicode characters");
+		expect(request?.systemPrompt).toContain("32 Unicode characters");
 		expect(request?.userPrompt).toContain("Implement compact grouped agent cards");
 		const title = commands(testHarness.calls, "set-status")
 			.filter(argv => argv[1] === "omp_plugin_surface-test")
 			.at(-1);
-		expect(title?.[2]).toBe("x".repeat(64));
-		expect(title).toContain("markdown");
+		expect(title?.[2]).toBe("x".repeat(32));
+		expect(title).not.toContain("--format");
 	});
 
 	test("bridges the root session through cmux OMP lifecycle hooks with exact GUI identity", async () => {
@@ -491,7 +493,7 @@ describe("OMP lifecycle adapter", () => {
 			"set-progress",
 			"0.3333",
 			"--label",
-			"Tasks 1/3 · 2 running",
+			"Tasks 1/3 · 2 run",
 			"--workspace",
 			"workspace-test",
 		]);
@@ -499,13 +501,13 @@ describe("OMP lifecycle adapter", () => {
 			"set-progress",
 			"0.6667",
 			"--label",
-			"Tasks 2/3 · 0 running",
+			"Tasks 2/3 · 0 run",
 			"--workspace",
 			"workspace-test",
 		]);
-		const groupedStatuses = commands(testHarness.calls, "set-status").filter(argv => argv[1]?.startsWith("omp_group_"));
-		expect(groupedStatuses.some(argv => argv[1] === "omp_group_surface-test_running" && argv[2] === "Running 2 · OMP, WorkerOne")).toBe(true);
-		expect(groupedStatuses.some(argv => argv[1] === "omp_group_surface-test_completed" && argv[2] === "Completed 2 · OMP, WorkerOne")).toBe(true);
+		const groupedStatuses = commands(testHarness.calls, "set-status").filter(argv => argv[1] === "omp_group_surface-test_counts");
+		expect(groupedStatuses.some(argv => argv[2] === "Run 2 · Block 0 · Done 0 · Ask 0 · Err 0")).toBe(true);
+		expect(groupedStatuses.some(argv => argv[2] === "Run 0 · Block 0 · Done 2 · Ask 0 · Err 0")).toBe(true);
 		expect(commands(testHarness.calls, "set-status").some(argv => argv[1]?.startsWith("omp_agent_"))).toBe(false);
 
 		const groupCommandCount = groupedStatuses.length;
@@ -552,9 +554,7 @@ describe("OMP lifecycle adapter", () => {
 		expect(hookCommands.at(-1)).toEqual(["hooks", "omp", "stop"]);
 		const cleared = commands(testHarness.calls, "clear-status");
 		expect(cleared).toContainEqual(["clear-status", "omp_plugin_surface-test", "--workspace", "workspace-test"]);
-		for (const group of ["running", "blocked", "completed", "decision", "errored"]) {
-			expect(cleared).toContainEqual(["clear-status", `omp_group_surface-test_${group}`, "--workspace", "workspace-test"]);
-		}
+		expect(cleared).toContainEqual(["clear-status", "omp_group_surface-test_counts", "--workspace", "workspace-test"]);
 		expect(cleared.some(argv => argv[1]?.startsWith("omp_agent_"))).toBe(false);
 	});
 
