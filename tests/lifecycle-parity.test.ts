@@ -36,6 +36,11 @@ function okResult(stdout = ""): CmuxCommandResult {
 	};
 }
 
+interface ForwardedNotification {
+	title: string;
+	body: string;
+}
+
 function lifecycleHarness(env: NodeJS.ProcessEnv, options: {
 	hasUI?: boolean;
 	now?: number;
@@ -44,6 +49,7 @@ function lifecycleHarness(env: NodeJS.ProcessEnv, options: {
 	ppid?: number;
 	hostname?: () => string;
 	runResult?: (argv: readonly string[]) => CmuxCommandResult;
+	forwardSshNotification?: (notification: ForwardedNotification, options?: { env?: NodeJS.ProcessEnv }) => number;
 } = {}) {
 	const handlers = new Map<string, Handler[]>();
 	const busHandlers = new Map<string, Array<(payload: unknown) => void>>();
@@ -98,6 +104,7 @@ function lifecycleHarness(env: NodeJS.ProcessEnv, options: {
 		...(options.pid === undefined ? {} : { pid: options.pid }),
 		...(options.ppid === undefined ? {} : { ppid: options.ppid }),
 		...(options.hostname === undefined ? {} : { hostname: options.hostname }),
+		...(options.forwardSshNotification === undefined ? {} : { forwardSshNotification: options.forwardSshNotification }),
 	});
 	return {
 		calls,
@@ -348,9 +355,12 @@ describe("runtime environment context", () => {
 });
 
 describe("semantic notifications", () => {
-	test("uses native TUI notify for ask, approval, successful plan, and classified final outcomes with exact dedupe", async () => {
-		const harness = lifecycleHarness({ PATH: process.env.PATH, HOSTNAME: "davailocal", CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock", CMUX_TUI_SURFACE_ID: "5" });
-		await harness.emit("session_start");
+	test("uses native TUI notify and forwards SSH desktop notifications for semantic outcomes with exact dedupe", async () => {
+		const forwarded: ForwardedNotification[] = [];
+		const harness = lifecycleHarness(
+			{ PATH: process.env.PATH, HOSTNAME: "davailocal", CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock", CMUX_TUI_SURFACE_ID: "5", SSH_TTY: "/dev/pts/7" },
+			{ forwardSshNotification(notification) { forwarded.push(notification); return 1; } },
+		);
 		await harness.emit("before_agent_start", { prompt: "First prompt" });
 		await harness.emit("tool_execution_start", { toolCallId: "ask-1", toolName: "mcp.ask" });
 		await harness.emit("tool_execution_start", { toolCallId: "ask-1", toolName: "mcp.ask" });
@@ -393,6 +403,16 @@ describe("semantic notifications", () => {
 			expect(option(argv, "--body")).toContain("Session: davailocal · cmux TUI");
 		}
 		for (const argv of notifications) expect(option(argv, "--surface")).toBe("5");
+		expect(forwarded.map(notification => notification.title)).toEqual([
+			"OMP needs your input",
+			"OMP needs tool approval",
+			"OMP plan ready",
+			"OMP needs your input",
+		]);
+		for (const notification of forwarded) {
+			expect(notification.body).toContain("Session: davailocal · cmux TUI");
+			expect(notification.body).not.toContain("Please choose a deployment.");
+		}
 		await harness.dispose();
 	});
 
