@@ -11,6 +11,7 @@ interface FakeContext {
 	hasPendingMessages(): boolean;
 	sessionManager: { getSessionId(): string };
 	setInterval(callback: () => void): Timer;
+	setTimeout(callback: () => void): Timer;
 	clearTimer(timer: Timer): void;
 }
 
@@ -18,6 +19,15 @@ interface RunCall {
 	argv: string[];
 	options: CmuxRunOptions;
 }
+
+interface SummaryRequest {
+	model: string;
+	maxChars: number;
+	systemPrompt: string;
+	userPrompt: string;
+}
+
+type SummaryGenerator = (request: SummaryRequest) => Promise<string | undefined>;
 
 function okResult(): CmuxCommandResult {
 	return {
@@ -32,7 +42,7 @@ function okResult(): CmuxCommandResult {
 	};
 }
 
-function harness() {
+function harness(options: { summaryGenerator?: SummaryGenerator } = {}) {
 	const handlers = new Map<string, ExtensionHandler[]>();
 	const busHandlers = new Map<string, BusHandler[]>();
 	const calls: RunCall[] = [];
@@ -42,6 +52,10 @@ function harness() {
 		hasPendingMessages: () => pendingMessages,
 		sessionManager: { getSessionId: () => "session-test" },
 		setInterval: callback => callback as unknown as Timer,
+		setTimeout: callback => {
+			queueMicrotask(callback);
+			return callback as unknown as Timer;
+		},
 		clearTimer: () => undefined,
 	};
 	const api = {
@@ -61,8 +75,8 @@ function harness() {
 			},
 		},
 	};
-	const run = async (argv: readonly string[], options: CmuxRunOptions = {}) => {
-		calls.push({ argv: [...argv], options });
+	const run = async (argv: readonly string[], runOptions: CmuxRunOptions = {}) => {
+		calls.push({ argv: [...argv], options: runOptions });
 		return okResult();
 	};
 	const dispose = registerCmuxLifecycle(api as never, {
@@ -73,7 +87,8 @@ function harness() {
 			CMUX_WORKSPACE_ID: "workspace-test",
 			CMUX_SURFACE_ID: "surface-test",
 		},
-	});
+		summaryGenerator: options.summaryGenerator,
+	} as never);
 	return {
 		calls,
 		dispose,
@@ -82,11 +97,11 @@ function harness() {
 		},
 		async emit(event: string, payload: unknown = { type: event }) {
 			for (const handler of handlers.get(event) ?? []) await handler(payload, context);
-			await Bun.sleep(0);
+			for (let index = 0; index < 32; index += 1) await Promise.resolve();
 		},
 		async emitBus(channel: string, payload: unknown) {
 			for (const handler of busHandlers.get(channel) ?? []) handler(payload);
-			await Bun.sleep(0);
+			for (let index = 0; index < 32; index += 1) await Promise.resolve();
 		},
 	};
 }
@@ -131,41 +146,111 @@ describe("OMP lifecycle adapter", () => {
 		expect(notifications(testHarness.calls)[0]).toContain("OMP turn complete");
 	});
 
-	test("summarizes the root and live subagents in the workspace status", async () => {
+	test("groups every workspace agent into five compact status rows", async () => {
 		const testHarness = harness();
 		await testHarness.emit("session_start");
-		expect(rawMainStatuses(testHarness.calls).at(-1)).toBe("1 agent · Idle");
-
-		await testHarness.emit("before_agent_start");
-		expect(rawMainStatuses(testHarness.calls).at(-1)).toBe("1 agent · Working");
-
+		await testHarness.emit("before_agent_start", { prompt: "Coordinate parser delivery" });
 		await testHarness.emitBus("task:subagent:progress", {
 			agent: "WorkerOne",
 			progress: { id: "agent-1", status: "running", currentTool: "edit" },
 		});
-		expect(rawMainStatuses(testHarness.calls).at(-1)).toBe("2 agents · Working");
-
 		await testHarness.emitBus("task:subagent:lifecycle", {
 			id: "agent-2",
 			name: "WorkerTwo",
 			status: "parked",
-			description: "waiting for review",
+			description: "waiting on a dependency",
 		});
-		expect(rawMainStatuses(testHarness.calls).at(-1)).toBe("3 agents · Working");
-		expect(commands(testHarness.calls, "set-status").some(argv => argv[2] === "WorkerTwo: waiting for review")).toBe(true);
-
-		await testHarness.emitBus("task:subagent:progress", {
-			agent: "WorkerOne",
-			progress: { id: "agent-1", status: "failed" },
-		});
-		expect(rawMainStatuses(testHarness.calls).at(-1)).toBe("2 agents · Working");
-
 		await testHarness.emitBus("task:subagent:lifecycle", {
-			id: "agent-2",
-			name: "WorkerTwo",
+			id: "agent-3",
+			name: "Finisher",
 			status: "completed",
 		});
-		expect(rawMainStatuses(testHarness.calls).at(-1)).toBe("1 agent · Working");
+		await testHarness.emitBus("task:subagent:lifecycle", {
+			id: "agent-4",
+			name: "Builder",
+			status: "failed",
+		});
+
+		const latest = new Map(
+			commands(testHarness.calls, "set-status")
+				.filter(argv => argv[1]?.startsWith("omp_group_surface-test_"))
+				.map(argv => [argv[1]!, argv]),
+		);
+		expect([...latest.entries()].map(([key, argv]) => [key, argv[2], argv[argv.indexOf("--color") + 1], argv[argv.indexOf("--format") + 1]])).toEqual([
+			["omp_group_surface-test_running", "Running 2 · OMP, WorkerOne", "#7AA2F7", "markdown"],
+			["omp_group_surface-test_blocked", "Blocked 1 · WorkerTwo", "#E0AF68", "markdown"],
+			["omp_group_surface-test_completed", "Completed 1 · Finisher", "#9ECE6A", "markdown"],
+			["omp_group_surface-test_decision", "Needs decision 0", "#BB9AF7", "markdown"],
+			["omp_group_surface-test_errored", "Errored 1 · Builder", "#F7768E", "markdown"],
+		]);
+		expect(commands(testHarness.calls, "set-status").some(argv => argv[1]?.startsWith("omp_agent_"))).toBe(false);
+
+		await testHarness.emit("tool_execution_start", { toolCallId: "ask-1", toolName: "ask" });
+		const decisionRows = commands(testHarness.calls, "set-status").filter(argv => argv[1] === "omp_group_surface-test_decision");
+		expect(decisionRows.at(-1)?.[2]).toBe("Needs decision 1 · OMP");
+	});
+
+	test("aggregates root Todo and all subagent tasks in the workspace taskbar", async () => {
+		const testHarness = harness();
+		await testHarness.emit("session_start");
+		await testHarness.emit("before_agent_start", { prompt: "Coordinate parser delivery" });
+		await testHarness.emitBus("task:subagent:progress", {
+			agent: "Worker",
+			progress: { id: "agent-1", status: "running" },
+		});
+		await testHarness.emitBus("task:subagent:lifecycle", { id: "agent-2", name: "Finisher", status: "completed" });
+		await testHarness.emitBus("task:subagent:lifecycle", { id: "agent-3", name: "Builder", status: "failed" });
+		await testHarness.emit("tool_execution_end", {
+			toolCallId: "todo-1",
+			toolName: "todo",
+			isError: false,
+			result: {
+				details: {
+					phases: [{
+						name: "Implementation",
+						tasks: [
+							{ content: "Done", status: "completed" },
+							{ content: "Verify", status: "in_progress" },
+							{ content: "Ship", status: "pending" },
+						],
+					}],
+				},
+			},
+		});
+
+		expect(commands(testHarness.calls, "set-progress").at(-1)).toEqual([
+			"set-progress",
+			"0.3333",
+			"--label",
+			"Tasks 2/6 · 2 running · 1 error",
+			"--workspace",
+			"workspace-test",
+		]);
+	});
+
+	test("uses configured Codex Luna for a strictly bounded workspace title", async () => {
+		let request: SummaryRequest | undefined;
+		const testHarness = harness({
+			summaryGenerator: async value => {
+				request = value;
+				return `**${"x".repeat(90)}**\nignore this line`;
+			},
+		});
+		await testHarness.emit("session_start");
+		await testHarness.emit("before_agent_start", { prompt: "Implement compact grouped agent cards" });
+		for (let index = 0; index < 32; index += 1) await Promise.resolve();
+
+		expect(request).toMatchObject({
+			model: "openai-codex/gpt-5.6-luna",
+			maxChars: 64,
+		});
+		expect(request?.systemPrompt).toContain("64 Unicode characters");
+		expect(request?.userPrompt).toContain("Implement compact grouped agent cards");
+		const title = commands(testHarness.calls, "set-status")
+			.filter(argv => argv[1] === "omp_plugin_surface-test")
+			.at(-1);
+		expect(title?.[2]).toBe("x".repeat(64));
+		expect(title).toContain("markdown");
 	});
 
 	test("bridges the root session through cmux OMP lifecycle hooks with exact GUI identity", async () => {
@@ -264,7 +349,8 @@ describe("OMP lifecycle adapter", () => {
 			expect(argv).toContain("surface-test");
 		}
 		const decisionIndex = testHarness.calls.findIndex(call => call.argv.includes("OMP needs your input"));
-		expect(testHarness.calls[decisionIndex - 2]?.argv).toEqual([
+		const decisionStatus = testHarness.calls.find(call => call.argv[1] === "omp_plugin_surface-test" && call.argv[2] === "1 agent · Needs input");
+		expect(decisionStatus?.argv).toEqual([
 			"set-status",
 			"omp_plugin_surface-test",
 			"1 agent · Needs input",
@@ -274,9 +360,12 @@ describe("OMP lifecycle adapter", () => {
 			"#ffd60a",
 			"--priority",
 			"100",
+			"--format",
+			"markdown",
 			"--workspace",
 			"workspace-test",
 		]);
+		expect(testHarness.calls.indexOf(decisionStatus!)).toBeLessThan(decisionIndex);
 		expect(testHarness.calls[decisionIndex - 1]?.argv).toEqual([
 			"trigger-flash",
 			"--workspace",
@@ -397,25 +486,35 @@ describe("OMP lifecycle adapter", () => {
 		});
 		expect(notifications(testHarness.calls)).toHaveLength(1);
 		expect(notifications(testHarness.calls)[0]).toContain("OMP turn complete");
-		expect(commands(testHarness.calls, "set-progress")[0]).toEqual([
+		const progressCommands = commands(testHarness.calls, "set-progress");
+		expect(progressCommands).toContainEqual([
 			"set-progress",
-			"0.5000",
+			"0.3333",
 			"--label",
-			"Implementation: Verify behavior",
+			"Tasks 1/3 · 2 running",
 			"--workspace",
 			"workspace-test",
 		]);
-		const agentStatuses = commands(testHarness.calls, "set-status").filter(argv => argv[1]?.startsWith("omp_agent_"));
-		expect(agentStatuses.some(argv => argv[2] === "WorkerOne: tool: edit")).toBe(true);
-		expect(commands(testHarness.calls, "clear-status").some(argv => argv[1]?.startsWith("omp_agent_"))).toBe(true);
+		expect(progressCommands.at(-1)).toEqual([
+			"set-progress",
+			"0.6667",
+			"--label",
+			"Tasks 2/3 · 0 running",
+			"--workspace",
+			"workspace-test",
+		]);
+		const groupedStatuses = commands(testHarness.calls, "set-status").filter(argv => argv[1]?.startsWith("omp_group_"));
+		expect(groupedStatuses.some(argv => argv[1] === "omp_group_surface-test_running" && argv[2] === "Running 2 · OMP, WorkerOne")).toBe(true);
+		expect(groupedStatuses.some(argv => argv[1] === "omp_group_surface-test_completed" && argv[2] === "Completed 2 · OMP, WorkerOne")).toBe(true);
+		expect(commands(testHarness.calls, "set-status").some(argv => argv[1]?.startsWith("omp_agent_"))).toBe(false);
 
-		const agentCommandCount = agentStatuses.length;
+		const groupCommandCount = groupedStatuses.length;
 		await testHarness.emitBus("task:subagent:progress", {
 			agent: "WorkerOne",
 			progress: { id: "agent-1", agent: "task", status: "running", currentTool: "bash" },
 		});
-		const afterLateEvent = commands(testHarness.calls, "set-status").filter(argv => argv[1]?.startsWith("omp_agent_"));
-		expect(afterLateEvent).toHaveLength(agentCommandCount);
+		const afterLateEvent = commands(testHarness.calls, "set-status").filter(argv => argv[1]?.startsWith("omp_group_"));
+		expect(afterLateEvent).toHaveLength(groupCommandCount);
 	});
 
 	test("does not complete while messages are pending and clears only owned sidebar state on shutdown", async () => {
@@ -453,7 +552,10 @@ describe("OMP lifecycle adapter", () => {
 		expect(hookCommands.at(-1)).toEqual(["hooks", "omp", "stop"]);
 		const cleared = commands(testHarness.calls, "clear-status");
 		expect(cleared).toContainEqual(["clear-status", "omp_plugin_surface-test", "--workspace", "workspace-test"]);
-		expect(cleared).toContainEqual(["clear-status", "omp_agent_surface-test_agent-1", "--workspace", "workspace-test"]);
+		for (const group of ["running", "blocked", "completed", "decision", "errored"]) {
+			expect(cleared).toContainEqual(["clear-status", `omp_group_surface-test_${group}`, "--workspace", "workspace-test"]);
+		}
+		expect(cleared.some(argv => argv[1]?.startsWith("omp_agent_"))).toBe(false);
 	});
 
 
@@ -480,10 +582,11 @@ describe("OMP lifecycle adapter", () => {
 				hasPendingMessages: () => false,
 				sessionManager: { getSessionId: () => "session-test" },
 				setInterval: callback => callback as unknown as Timer,
+				setTimeout: callback => callback as unknown as Timer,
 				clearTimer: () => undefined,
 			},
 		);
-		await Bun.sleep(0);
+		for (let index = 0; index < 32; index += 1) await Promise.resolve();
 		expect(calls).toEqual([]);
 	});
 });

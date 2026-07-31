@@ -145,9 +145,9 @@ function option(argv: string[], name: string): string | undefined {
 }
 
 async function flush(harness: TickHarness) {
-	for (let index = 0; index < 8; index += 1) await Promise.resolve();
+	for (let index = 0; index < 32; index += 1) await Promise.resolve();
 	await harness.tick();
-	for (let index = 0; index < 8; index += 1) await Promise.resolve();
+	for (let index = 0; index < 32; index += 1) await Promise.resolve();
 }
 
 
