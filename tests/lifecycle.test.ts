@@ -362,8 +362,6 @@ describe("OMP lifecycle adapter", () => {
 			"#ffd60a",
 			"--priority",
 			"100",
-			"--format",
-			"markdown",
 			"--workspace",
 			"workspace-test",
 		]);

@@ -213,13 +213,6 @@ function agentActivity(agent: SubagentSnapshot): string {
 	return agent.activity ? `${agent.name}: ${agent.activity}` : `${agent.name}: ${agent.status}`;
 }
 
-function workspaceStatusText(subagents: readonly SubagentSnapshot[], statusText: string): string {
-	let activeAgentCount = 1;
-	for (const agent of subagents) {
-		if (agent.status !== "completed" && agent.status !== "failed") activeAgentCount += 1;
-	}
-	return `${activeAgentCount} ${activeAgentCount === 1 ? "agent" : "agents"} · ${statusText}`;
-}
 
 function rootAgentGroup(status: LifecycleStatus): WorkspaceAgentGroup {
 	switch (status) {
@@ -550,7 +543,7 @@ export function registerCmuxLifecycle(
 		if (!rootActive || backend !== "gui" || !workspaceArgs) return;
 		const snapshot = machine.snapshot;
 		const mainStyle = summaryTitle ? { icon: "rectangle.3.group.fill", color: "#C0CAF5" } : STATUS_STYLES[snapshot.status];
-		const mainValue = truncateUnicode(summaryTitle ?? workspaceStatusText(snapshot.subagents, snapshot.statusText), SUMMARY_MAX_CHARS);
+		const mainValue = truncateUnicode(summaryTitle ?? snapshot.statusText, SUMMARY_MAX_CHARS);
 		const publish = (key: string, value: string, style: StatusStyle, priority: string): void => {
 			const signature = JSON.stringify([value, style.icon, style.color, priority]);
 			if (lastGuiStatusValues.get(key) === signature) return;
