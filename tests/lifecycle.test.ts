@@ -351,11 +351,11 @@ describe("OMP lifecycle adapter", () => {
 			expect(argv).toContain("surface-test");
 		}
 		const decisionIndex = testHarness.calls.findIndex(call => call.argv.includes("OMP needs your input"));
-		const decisionStatus = testHarness.calls.find(call => call.argv[1] === "omp_plugin_surface-test" && call.argv[2] === "1 agent · Needs input");
+		const decisionStatus = testHarness.calls.find(call => call.argv[1] === "omp_plugin_surface-test" && call.argv[2] === "Needs input");
 		expect(decisionStatus?.argv).toEqual([
 			"set-status",
 			"omp_plugin_surface-test",
-			"1 agent · Needs input",
+			"Needs input",
 			"--icon",
 			"questionmark.circle",
 			"--color",
