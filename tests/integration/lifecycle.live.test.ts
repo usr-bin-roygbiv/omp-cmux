@@ -8,6 +8,7 @@ const surfaceId = process.env.CMUX_SURFACE_ID;
 const liveTest = process.env.CMUX_LIFECYCLE_INTEGRATION === "1" && workspaceId && surfaceId ? test : test.skip;
 const statusSurface = (surfaceId ?? "unknown").replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "unknown";
 const mainStatusKey = `omp_plugin_${statusSurface}`;
+const countStatusKey = `omp_group_${statusSurface}_counts`;
 
 interface LiveContext {
 	hasUI: boolean;
@@ -114,22 +115,22 @@ liveTest(
 			await waitForSidebar("  live-probe=Visible");
 			await command(["clear-status", "live-probe", "--workspace", workspaceId!]);
 			await emit("session_start");
-			await waitForSidebar(`  ${mainStatusKey}=1 agent · Idle`);
+			await waitForSidebar(`  ${mainStatusKey}=Idle`);
 			await emit("before_agent_start");
-			await waitForSidebar(`  ${mainStatusKey}=1 agent · Working`);
+			await waitForSidebar(`  ${mainStatusKey}=Working`);
 			await emit("agent_start");
-			await waitForSidebar(`  ${mainStatusKey}=1 agent · Thinking`);
+			await waitForSidebar(`  ${mainStatusKey}=Thinking`);
 			await emit("tool_execution_start", { toolCallId: "read-1", toolName: "read" });
-			await waitForSidebar(`  ${mainStatusKey}=1 agent · Tool: read`);
+			await waitForSidebar(`  ${mainStatusKey}=Tool: read`);
 			await emit("tool_execution_end", { toolCallId: "read-1", toolName: "read", isError: false, result: {} });
 			await emit("auto_retry_start", { attempt: 1, maxAttempts: 3 });
-			await waitForSidebar(`  ${mainStatusKey}=1 agent · Retrying 1/3`);
+			await waitForSidebar(`  ${mainStatusKey}=Retrying 1/3`);
 			await emit("auto_retry_end", { success: true });
 			await emit("auto_compaction_start");
-			await waitForSidebar(`  ${mainStatusKey}=1 agent · Compacting`);
+			await waitForSidebar(`  ${mainStatusKey}=Compacting`);
 			await emit("auto_compaction_end", { aborted: false, willRetry: false });
 			await emit("tool_execution_start", { toolCallId: "ask-1", toolName: "ask" });
-			await waitForSidebar(`  ${mainStatusKey}=1 agent · Needs input`);
+			await waitForSidebar(`  ${mainStatusKey}=Needs input`);
 			await emit("tool_execution_start", { toolCallId: "ask-1", toolName: "ask" });
 			await emit("tool_execution_end", { toolCallId: "ask-1", toolName: "ask", isError: false, result: {} });
 
@@ -138,8 +139,8 @@ liveTest(
 				task: "Verify lifecycle",
 				progress: { id: "agent-1", status: "running", currentTool: "edit" },
 			});
-			await waitForSidebar("WorkerOne: tool: edit");
-			await waitForSidebar(`  ${mainStatusKey}=2 agents · Thinking`);
+			await waitForSidebar(`  ${countStatusKey}=Run 2 · Block 0 · Done 0 · Ask 0 · Err 0`);
+			await waitForSidebar(`  ${mainStatusKey}=Thinking`);
 			await emit("tool_execution_start", { toolCallId: "todo-1", toolName: "todo" });
 			await emit("tool_execution_end", {
 				toolCallId: "todo-1",
@@ -159,9 +160,12 @@ liveTest(
 					},
 				},
 			});
-			await waitForSidebar("progress=0.50 Verification: Finish");
+			const compactSidebar = await waitForSidebar("progress=0.33 Tasks 1/3 · 2 run");
+			expect(compactSidebar).toContain("status_count=3");
+			expect(compactSidebar).not.toContain(`omp_group_${statusSurface}_running=`);
+			expect(compactSidebar).not.toContain("format=markdown");
 			await emit("agent_end", { messages: [] });
-			await waitForSidebar(`  ${mainStatusKey}=2 agents · Waiting for 1 subagent`);
+			await waitForSidebar(`  ${mainStatusKey}=Waiting for 1 subagent`);
 			await waitForNotificationCount("OMP needs your input", 1);
 			expect(newNotifications(await listedNotifications()).filter(item => item.title === "OMP turn complete")).toHaveLength(0);
 
@@ -169,7 +173,7 @@ liveTest(
 				agent: "WorkerOne",
 				progress: { id: "agent-1", status: "completed" },
 			});
-			await waitForSidebar(`  ${mainStatusKey}=1 agent · Done`);
+			await waitForSidebar(`  ${mainStatusKey}=Done`);
 			await emit("session_stop", {
 				turn_id: 1,
 				session_id: "omp-cmux-gui-live-probe",
@@ -193,7 +197,7 @@ liveTest(
 				stop_hook_active: false,
 				messages: [{ role: "assistant", errorMessage: "provider failed" }],
 			});
-			await waitForSidebar(`  ${mainStatusKey}=1 agent · Error`);
+			await waitForSidebar(`  ${mainStatusKey}=Error`);
 			await waitForNotificationCount("OMP turn failed", 1);
 			const notificationCountAfterFailure = lifecycleCommands.filter(args => args[0] === "notify").length;
 
@@ -205,13 +209,14 @@ liveTest(
 				stop_hook_active: false,
 				messages: [{ role: "assistant", stopReason: "aborted" }],
 			});
-			await waitForSidebar(`  ${mainStatusKey}=1 agent · Stopped`);
+			await waitForSidebar(`  ${mainStatusKey}=Stopped`);
 			expect(lifecycleCommands.filter(args => args[0] === "notify")).toHaveLength(notificationCountAfterFailure);
 		} finally {
 			await dispose();
 			const cleaned = await waitForSidebar("progress=none");
 			expect(cleaned).not.toContain(`  ${mainStatusKey}=`);
 			expect(cleaned).not.toContain("  omp_agent_");
+			expect(cleaned).not.toContain(`  ${countStatusKey}=`);
 			for (const item of newNotifications(await listedNotifications())) {
 				const id = notificationId(item);
 				if (id) await command(["--json", "dismiss-notification", "--id", id]);
