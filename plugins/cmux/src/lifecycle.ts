@@ -64,9 +64,8 @@ type WorkspaceSummaryGenerator = (
 
 const RUNTIME_ENVIRONMENT_OPEN = "<runtime-environment>";
 const SUMMARY_MODEL = "openai-codex/gpt-5.6-luna";
-const SUMMARY_MAX_CHARS = 64;
+const SUMMARY_MAX_CHARS = 32;
 const SUMMARY_INPUT_MAX_CHARS = 2_000;
-const GROUP_LINE_MAX_CHARS = 72;
 
 const REMOTE_MESSAGES: Record<NotificationKind, string> = {
 	input: "OMP is waiting for your response",
@@ -92,13 +91,8 @@ const STATUS_STYLES: Record<LifecycleStatus, StatusStyle> = {
 };
 
 const WORKSPACE_GROUP_ORDER = ["running", "blocked", "completed", "decision", "errored"] as const;
-const WORKSPACE_GROUP_SPECS: Record<WorkspaceAgentGroup, { label: string; icon: string; color: string; priority: string }> = {
-	running: { label: "Running", icon: "play.circle.fill", color: "#7AA2F7", priority: "95" },
-	blocked: { label: "Blocked", icon: "pause.circle.fill", color: "#E0AF68", priority: "94" },
-	completed: { label: "Completed", icon: "checkmark.circle.fill", color: "#9ECE6A", priority: "93" },
-	decision: { label: "Needs decision", icon: "person.crop.circle.badge.questionmark", color: "#BB9AF7", priority: "92" },
-	errored: { label: "Errored", icon: "exclamationmark.triangle.fill", color: "#F7768E", priority: "91" },
-};
+const COMPACT_COUNTS_STYLE: StatusStyle = { icon: "person.2.fill", color: "#7AA2F7" };
+const COMPACT_COUNTS_PRIORITY = "95";
 
 function record(value: unknown): Record<string, unknown> | undefined {
 	return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
@@ -209,23 +203,16 @@ function contextSessionId(ctx: ExtensionContext | undefined, eventSessionId?: un
 	}
 }
 
-function scopedStatusKey(kind: "session" | "group", surfaceId: string | undefined, group?: WorkspaceAgentGroup): string {
+function scopedStatusKey(kind: "session" | "group", surfaceId: string | undefined, group?: string): string {
 	const normalizedSurface = (surfaceId ?? "unknown").replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "unknown";
 	if (kind === "session") return `${MAIN_STATUS_PREFIX}_${normalizedSurface}`;
-	return `${GROUP_STATUS_PREFIX}_${normalizedSurface}_${group ?? "running"}`;
+	return `${GROUP_STATUS_PREFIX}_${normalizedSurface}_${group ?? "counts"}`;
 }
 
 function agentActivity(agent: SubagentSnapshot): string {
 	return agent.activity ? `${agent.name}: ${agent.activity}` : `${agent.name}: ${agent.status}`;
 }
 
-function workspaceStatusText(subagents: readonly SubagentSnapshot[], statusText: string): string {
-	let activeAgentCount = 1;
-	for (const agent of subagents) {
-		if (agent.status !== "completed" && agent.status !== "failed") activeAgentCount += 1;
-	}
-	return `${activeAgentCount} ${activeAgentCount === 1 ? "agent" : "agents"} · ${statusText}`;
-}
 
 function rootAgentGroup(status: LifecycleStatus): WorkspaceAgentGroup {
 	switch (status) {
@@ -247,17 +234,17 @@ function subagentGroup(status: SubagentSnapshot["status"]): WorkspaceAgentGroup 
 	}
 }
 
-function workspaceAgentGroups(status: LifecycleStatus, subagents: readonly SubagentSnapshot[]): Record<WorkspaceAgentGroup, string[]> {
-	const groups: Record<WorkspaceAgentGroup, string[]> = {
-		running: [],
-		blocked: [],
-		completed: [],
-		decision: [],
-		errored: [],
+function workspaceAgentCounts(status: LifecycleStatus, subagents: readonly SubagentSnapshot[]): Record<WorkspaceAgentGroup, number> {
+	const counts: Record<WorkspaceAgentGroup, number> = {
+		running: 0,
+		blocked: 0,
+		completed: 0,
+		decision: 0,
+		errored: 0,
 	};
-	groups[rootAgentGroup(status)].push("OMP");
-	for (const agent of subagents) groups[subagentGroup(agent.status)].push(agent.name);
-	return groups;
+	counts[rootAgentGroup(status)] += 1;
+	for (const agent of subagents) counts[subagentGroup(agent.status)] += 1;
+	return counts;
 }
 
 
@@ -266,20 +253,8 @@ function truncateUnicode(value: string, maxChars: number): string {
 	return characters.length <= maxChars ? value : characters.slice(0, maxChars).join("");
 }
 
-function workspaceGroupText(group: WorkspaceAgentGroup, names: readonly string[]): string {
-	const prefix = `${WORKSPACE_GROUP_SPECS[group].label} ${names.length}`;
-	if (names.length === 0) return prefix;
-	const included: string[] = [];
-	for (let index = 0; index < names.length; index += 1) {
-		const remaining = names.length - index - 1;
-		const suffix = remaining > 0 ? ` +${remaining}` : "";
-		const candidate = `${prefix} · ${[...included, names[index]].join(", ")}${suffix}`;
-		if (Array.from(candidate).length > GROUP_LINE_MAX_CHARS) break;
-		included.push(names[index]!);
-	}
-	if (included.length === names.length) return `${prefix} · ${included.join(", ")}`;
-	if (included.length === 0) return `${prefix} · +${names.length}`;
-	return `${prefix} · ${included.join(", ")} +${names.length - included.length}`;
+function workspaceCountsText(counts: Readonly<Record<WorkspaceAgentGroup, number>>): string {
+	return `Run ${counts.running} · Block ${counts.blocked} · Done ${counts.completed} · Ask ${counts.decision} · Err ${counts.errored}`;
 }
 
 function aggregateTaskProgress(status: LifecycleStatus, todo: { completed: number; total: number } | undefined, subagents: readonly SubagentSnapshot[]): { fraction: number; label: string } | undefined {
@@ -287,12 +262,11 @@ function aggregateTaskProgress(status: LifecycleStatus, todo: { completed: numbe
 	const completed = (todo?.completed ?? 0) + completedSubagents;
 	const total = (todo?.total ?? 0) + subagents.length;
 	if (total === 0) return undefined;
-	const groups = workspaceAgentGroups(status, subagents);
-	const errorCount = groups.errored.length;
-	const errorLabel = errorCount > 0 ? ` · ${errorCount} ${errorCount === 1 ? "error" : "errors"}` : "";
+	const counts = workspaceAgentCounts(status, subagents);
+	const errorLabel = counts.errored > 0 ? ` · ${counts.errored} err` : "";
 	return {
 		fraction: Math.min(1, Math.max(0, completed / total)),
-		label: `Tasks ${completed}/${total} · ${groups.running.length} running${errorLabel}`,
+		label: `Tasks ${completed}/${total} · ${counts.running} run${errorLabel}`,
 	};
 }
 
@@ -300,8 +274,8 @@ function summaryRequest(prompt: string): WorkspaceSummaryRequest {
 	return {
 		model: SUMMARY_MODEL,
 		maxChars: SUMMARY_MAX_CHARS,
-		systemPrompt: `Write one concise plain-text title for an OMP workspace card. Strict limit: ${SUMMARY_MAX_CHARS} Unicode characters, including spaces. Return only the title: no Markdown markers, quotes, labels, newline, or trailing period. Mention the concrete task, not generic agent activity.`,
-		userPrompt: `Create the workspace title. Agent status specifics render underneath it, so do not repeat counts or status labels.\n\nRoot request:\n${truncateUnicode(prompt.replace(/\s+/g, " ").trim(), SUMMARY_INPUT_MAX_CHARS)}`,
+		systemPrompt: `Write one brief plain-text title for an OMP workspace card. Strict limit: ${SUMMARY_MAX_CHARS} Unicode characters, including spaces. Return only a short concrete task phrase: no Markdown markers, quotes, labels, newline, or trailing period.`,
+		userPrompt: `Create the workspace title. Counts render underneath it, so do not repeat agent names, counts, or status labels.\n\nRoot request:\n${truncateUnicode(prompt.replace(/\s+/g, " ").trim(), SUMMARY_INPUT_MAX_CHARS)}`,
 	};
 }
 
@@ -367,7 +341,7 @@ async function generateWorkspaceSummary(request: WorkspaceSummaryRequest, ctx: E
 		},
 		{
 			apiKey: ctx.modelRegistry.resolver(model, contextSessionId(ctx)),
-			maxTokens: 96,
+			maxTokens: 48,
 			disableReasoning: true,
 			hideThinkingSummary: true,
 			textVerbosity: "low",
@@ -473,8 +447,8 @@ export function registerCmuxLifecycle(
 	const summaryGenerator = options.summaryGenerator ?? generateWorkspaceSummary;
 	const runner = options.run ?? runCmux;
 	const targetEnv: NodeJS.ProcessEnv = { ...(options.env ?? process.env) };
-	const groupStatusKeys = new Map<WorkspaceAgentGroup, string>();
-	for (const group of WORKSPACE_GROUP_ORDER) groupStatusKeys.set(group, scopedStatusKey("group", text(targetEnv.CMUX_SURFACE_ID), group));
+	const countStatusKey = scopedStatusKey("group", text(targetEnv.CMUX_SURFACE_ID), "counts");
+	const legacyGroupStatusKeys = WORKSPACE_GROUP_ORDER.map(group => scopedStatusKey("group", text(targetEnv.CMUX_SURFACE_ID), group));
 	const forwardSshNotification = options.forwardSshNotification ?? forwardSshDesktopNotification;
 	const now = options.now ?? Date.now;
 	const tuiRequested = Boolean(text(targetEnv.CMUX_TUI_SOCKET));
@@ -504,6 +478,7 @@ export function registerCmuxLifecycle(
 	let summaryGeneration = 0;
 	let summaryAbort: AbortController | undefined;
 	let lastGuiProgressSignature: string | undefined;
+	let legacyGroupStatusesCleared = false;
 
 	const discoverTuiSurface = async (): Promise<string | undefined> => {
 		if (tuiSurface || backend !== "tui") return tuiSurface;
@@ -568,19 +543,15 @@ export function registerCmuxLifecycle(
 		if (!rootActive || backend !== "gui" || !workspaceArgs) return;
 		const snapshot = machine.snapshot;
 		const mainStyle = summaryTitle ? { icon: "rectangle.3.group.fill", color: "#C0CAF5" } : STATUS_STYLES[snapshot.status];
-		const mainValue = summaryTitle ?? workspaceStatusText(snapshot.subagents, snapshot.statusText);
+		const mainValue = truncateUnicode(summaryTitle ?? snapshot.statusText, SUMMARY_MAX_CHARS);
 		const publish = (key: string, value: string, style: StatusStyle, priority: string): void => {
 			const signature = JSON.stringify([value, style.icon, style.color, priority]);
 			if (lastGuiStatusValues.get(key) === signature) return;
 			lastGuiStatusValues.set(key, signature);
-			enqueue(["set-status", key, value, "--icon", style.icon, "--color", style.color, "--priority", priority, "--format", "markdown", ...workspaceArgs!]);
+			enqueue(["set-status", key, value, "--icon", style.icon, "--color", style.color, "--priority", priority, ...workspaceArgs!]);
 		};
 		publish(mainStatusKey, mainValue, mainStyle, STATUS_PRIORITY);
-		const groups = workspaceAgentGroups(snapshot.status, snapshot.subagents);
-		for (const group of WORKSPACE_GROUP_ORDER) {
-			const spec = WORKSPACE_GROUP_SPECS[group];
-			publish(groupStatusKeys.get(group)!, workspaceGroupText(group, groups[group]), spec, spec.priority);
-		}
+		publish(countStatusKey, workspaceCountsText(workspaceAgentCounts(snapshot.status, snapshot.subagents)), COMPACT_COUNTS_STYLE, COMPACT_COUNTS_PRIORITY);
 	};
 
 	const reportGuiProgress = (): void => {
@@ -758,6 +729,10 @@ export function registerCmuxLifecycle(
 		summaryTitle = undefined;
 		lastGuiStatusValues.clear();
 		lastGuiProgressSignature = undefined;
+		if (backend === "gui" && workspaceArgs && !legacyGroupStatusesCleared) {
+			for (const key of legacyGroupStatusKeys) enqueue(["clear-status", key, ...workspaceArgs]);
+			legacyGroupStatusesCleared = true;
+		}
 		sendGuiHook("session-start", ctx);
 		dispatch({ type: "session-start" });
 		if (backend === "tui") await discoverTuiSurface();
@@ -868,7 +843,7 @@ export function registerCmuxLifecycle(
 		if (backend !== "gui" || !workspaceArgs) return;
 		enqueue(["clear-status", mainStatusKey, ...workspaceArgs], undefined, true);
 		enqueue(["clear-progress", ...workspaceArgs], undefined, true);
-		for (const key of groupStatusKeys.values()) enqueue(["clear-status", key, ...workspaceArgs], undefined, true);
+		enqueue(["clear-status", countStatusKey, ...workspaceArgs], undefined, true);
 		lastGuiStatusValues.clear();
 		lastGuiProgressSignature = undefined;
 	};
