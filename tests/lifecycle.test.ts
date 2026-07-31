@@ -349,7 +349,8 @@ describe("OMP lifecycle adapter", () => {
 			expect(argv).toContain("surface-test");
 		}
 		const decisionIndex = testHarness.calls.findIndex(call => call.argv.includes("OMP needs your input"));
-		expect(testHarness.calls[decisionIndex - 2]?.argv).toEqual([
+		const decisionStatus = testHarness.calls.find(call => call.argv[1] === "omp_plugin_surface-test" && call.argv[2] === "1 agent · Needs input");
+		expect(decisionStatus?.argv).toEqual([
 			"set-status",
 			"omp_plugin_surface-test",
 			"1 agent · Needs input",
@@ -359,9 +360,12 @@ describe("OMP lifecycle adapter", () => {
 			"#ffd60a",
 			"--priority",
 			"100",
+			"--format",
+			"markdown",
 			"--workspace",
 			"workspace-test",
 		]);
+		expect(testHarness.calls.indexOf(decisionStatus!)).toBeLessThan(decisionIndex);
 		expect(testHarness.calls[decisionIndex - 1]?.argv).toEqual([
 			"trigger-flash",
 			"--workspace",
@@ -482,25 +486,35 @@ describe("OMP lifecycle adapter", () => {
 		});
 		expect(notifications(testHarness.calls)).toHaveLength(1);
 		expect(notifications(testHarness.calls)[0]).toContain("OMP turn complete");
-		expect(commands(testHarness.calls, "set-progress")[0]).toEqual([
+		const progressCommands = commands(testHarness.calls, "set-progress");
+		expect(progressCommands).toContainEqual([
 			"set-progress",
-			"0.5000",
+			"0.3333",
 			"--label",
-			"Implementation: Verify behavior",
+			"Tasks 1/3 · 2 running",
 			"--workspace",
 			"workspace-test",
 		]);
-		const agentStatuses = commands(testHarness.calls, "set-status").filter(argv => argv[1]?.startsWith("omp_agent_"));
-		expect(agentStatuses.some(argv => argv[2] === "WorkerOne: tool: edit")).toBe(true);
-		expect(commands(testHarness.calls, "clear-status").some(argv => argv[1]?.startsWith("omp_agent_"))).toBe(true);
+		expect(progressCommands.at(-1)).toEqual([
+			"set-progress",
+			"0.6667",
+			"--label",
+			"Tasks 2/3 · 0 running",
+			"--workspace",
+			"workspace-test",
+		]);
+		const groupedStatuses = commands(testHarness.calls, "set-status").filter(argv => argv[1]?.startsWith("omp_group_"));
+		expect(groupedStatuses.some(argv => argv[1] === "omp_group_surface-test_running" && argv[2] === "Running 2 · OMP, WorkerOne")).toBe(true);
+		expect(groupedStatuses.some(argv => argv[1] === "omp_group_surface-test_completed" && argv[2] === "Completed 2 · OMP, WorkerOne")).toBe(true);
+		expect(commands(testHarness.calls, "set-status").some(argv => argv[1]?.startsWith("omp_agent_"))).toBe(false);
 
-		const agentCommandCount = agentStatuses.length;
+		const groupCommandCount = groupedStatuses.length;
 		await testHarness.emitBus("task:subagent:progress", {
 			agent: "WorkerOne",
 			progress: { id: "agent-1", agent: "task", status: "running", currentTool: "bash" },
 		});
-		const afterLateEvent = commands(testHarness.calls, "set-status").filter(argv => argv[1]?.startsWith("omp_agent_"));
-		expect(afterLateEvent).toHaveLength(agentCommandCount);
+		const afterLateEvent = commands(testHarness.calls, "set-status").filter(argv => argv[1]?.startsWith("omp_group_"));
+		expect(afterLateEvent).toHaveLength(groupCommandCount);
 	});
 
 	test("does not complete while messages are pending and clears only owned sidebar state on shutdown", async () => {

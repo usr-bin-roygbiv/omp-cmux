@@ -41,7 +41,7 @@ steps:
     environment:
       HOME: /tmp
     commands:
-      - bun add --dev --no-save @oh-my-pi/pi-coding-agent@latest
+      - bun add --dev --no-save @oh-my-pi/pi-coding-agent@latest @oh-my-pi/pi-ai@latest
       - bun run typecheck
       - bun test
     backend_options:
