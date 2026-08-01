@@ -587,4 +587,63 @@ describe("OMP lifecycle adapter", () => {
 		for (let index = 0; index < 32; index += 1) await Promise.resolve();
 		expect(calls).toEqual([]);
 	});
+
+	test("bounds shutdown settlement without dropping queued cleanup", async () => {
+		const handlers = new Map<string, ExtensionHandler[]>();
+		const calls: string[][] = [];
+		let releaseFirst!: () => void;
+		const firstCommand = new Promise<void>(resolve => { releaseFirst = resolve; });
+		let blockFirst = true;
+		const context: FakeContext = {
+			hasUI: true,
+			hasPendingMessages: () => false,
+			sessionManager: { getSessionId: () => "session-shutdown" },
+			setInterval: callback => callback as unknown as Timer,
+			clearTimer: () => undefined,
+		};
+		const api = {
+			on(event: string, handler: ExtensionHandler) {
+				const registered = handlers.get(event) ?? [];
+				registered.push(handler);
+				handlers.set(event, registered);
+			},
+			events: { on: () => undefined },
+		};
+		const dispose = registerCmuxLifecycle(api as never, {
+			run: async argv => {
+				calls.push([...argv]);
+				if (blockFirst) {
+					blockFirst = false;
+					await firstCommand;
+				}
+				return okResult();
+			},
+			env: { PATH: process.env.PATH, CMUX_WORKSPACE_ID: "workspace-test", CMUX_SURFACE_ID: "surface-test" },
+			shutdownSettleMs: 0,
+		});
+		const emit = async (event: string) => {
+			for (const handler of handlers.get(event) ?? []) await handler({ type: event }, context);
+		};
+
+		await emit("session_start");
+		await Bun.sleep(0);
+		const shutdown = emit("session_shutdown");
+		const outcome = await Promise.race([
+			shutdown.then(() => "settled"),
+			Bun.sleep(25).then(() => "timed-out"),
+		]);
+		try {
+			expect(outcome).toBe("settled");
+		} finally {
+			releaseFirst();
+			await shutdown;
+			await Bun.sleep(0);
+		}
+
+		const clearStatusIndex = calls.findIndex(argv => argv[0] === "clear-status" && argv[1] === "omp_plugin");
+		const clearProgressIndex = calls.findIndex(argv => argv[0] === "clear-progress");
+		expect(clearStatusIndex).toBeGreaterThan(0);
+		expect(clearProgressIndex).toBeGreaterThan(clearStatusIndex);
+		await dispose();
+	});
 });
