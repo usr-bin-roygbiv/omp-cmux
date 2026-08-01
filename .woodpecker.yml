@@ -17,6 +17,7 @@ steps:
     image: harbor.tailb18de3.ts.net/linkedin-bot/epyc-omp-workspace@sha256:2afa16d957719844939b2a45bad687e1e3cecf22abe23682e59972a076984e3f
     environment:
       HOME: /tmp
+      BUN_INSTALL_CACHE_DIR: /tmp/bun-install-cache
     commands:
       - if [ "$CI_PIPELINE_EVENT" = "cron" ]; then git fetch --force --tags https://github.com/usr-bin-roygbiv/omp-cmux.git main && git checkout --detach FETCH_HEAD; fi
       - bun install --frozen-lockfile
@@ -40,6 +41,7 @@ steps:
     image: harbor.tailb18de3.ts.net/linkedin-bot/epyc-omp-workspace@sha256:2afa16d957719844939b2a45bad687e1e3cecf22abe23682e59972a076984e3f
     environment:
       HOME: /tmp
+      BUN_INSTALL_CACHE_DIR: /tmp/bun-install-cache
     commands:
       - bun add --dev --no-save @oh-my-pi/pi-coding-agent@latest @oh-my-pi/pi-ai@latest
       - bun run typecheck
