@@ -18,8 +18,11 @@ steps:
     environment:
       HOME: /tmp
       BUN_INSTALL_CACHE_DIR: /tmp/bun-install-cache
+      CI_WORKSPACE_DIR: /tmp/omp-cmux-ci
     commands:
       - if [ "$CI_PIPELINE_EVENT" = "cron" ]; then git fetch --force --tags https://github.com/usr-bin-roygbiv/omp-cmux.git main && git checkout --detach FETCH_HEAD; fi
+      - cp -R . "$CI_WORKSPACE_DIR"
+      - cd "$CI_WORKSPACE_DIR"
       - bun install --frozen-lockfile
       - bun run typecheck
       - bun test
@@ -42,7 +45,10 @@ steps:
     environment:
       HOME: /tmp
       BUN_INSTALL_CACHE_DIR: /tmp/bun-install-cache
+      CI_WORKSPACE_DIR: /tmp/omp-cmux-ci
     commands:
+      - cp -R . "$CI_WORKSPACE_DIR"
+      - cd "$CI_WORKSPACE_DIR"
       - bun add --dev --no-save @oh-my-pi/pi-coding-agent@latest @oh-my-pi/pi-ai@latest
       - bun run typecheck
       - bun test
