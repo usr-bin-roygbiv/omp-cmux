@@ -23,6 +23,8 @@ function run(cwd: string, argv: string[], success = true): string {
 function configureAuthor(cwd: string): void {
 	run(cwd, ["git", "config", "user.name", "Compatibility Test"]);
 	run(cwd, ["git", "config", "user.email", "compatibility.invalid"]);
+	run(cwd, ["git", "config", "commit.gpgsign", "false"]);
+	run(cwd, ["git", "config", "tag.gpgsign", "false"]);
 }
 
 afterEach(() => {

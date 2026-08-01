@@ -226,6 +226,7 @@ describe("TUI-aware typed tools", () => {
 			["rpc", "workspace.list", "{}"],
 		]);
 
+
 		const tui = toolHarness(TUI_ENV);
 		expect([...tui.tools.keys()]).toEqual([
 			"cmux_capabilities",
