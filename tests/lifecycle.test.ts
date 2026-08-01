@@ -599,6 +599,7 @@ describe("OMP lifecycle adapter", () => {
 			hasPendingMessages: () => false,
 			sessionManager: { getSessionId: () => "session-shutdown" },
 			setInterval: callback => callback as unknown as Timer,
+			setTimeout: callback => callback as unknown as Timer,
 			clearTimer: () => undefined,
 		};
 		const api = {
@@ -637,11 +638,13 @@ describe("OMP lifecycle adapter", () => {
 		} finally {
 			releaseFirst();
 			await shutdown;
-			await Bun.sleep(0);
+			for (let index = 0; index < 50 && !calls.some(argv => argv[0] === "clear-status" && argv[1] === "omp_plugin_surface-test"); index += 1) {
+				await Bun.sleep(1);
+			}
 		}
 
-		const clearStatusIndex = calls.findIndex(argv => argv[0] === "clear-status" && argv[1] === "omp_plugin");
-		const clearProgressIndex = calls.findIndex(argv => argv[0] === "clear-progress");
+		const clearStatusIndex = calls.findIndex(argv => argv[0] === "clear-status" && argv[1] === "omp_plugin_surface-test");
+		const clearProgressIndex = calls.findIndex((argv, index) => index > clearStatusIndex && argv[0] === "clear-progress");
 		expect(clearStatusIndex).toBeGreaterThan(0);
 		expect(clearProgressIndex).toBeGreaterThan(clearStatusIndex);
 		await dispose();
