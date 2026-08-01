@@ -226,6 +226,7 @@ describe("TUI-aware typed tools", () => {
 			["rpc", "workspace.list", "{}"],
 		]);
 
+
 		const tui = toolHarness(TUI_ENV);
 		expect([...tui.tools.keys()]).toEqual([
 			"cmux_capabilities",
@@ -285,6 +286,10 @@ describe("cluster update CI", () => {
 		expect(pipeline.match(/ephemeral-storage: 4Gi/g) ?? []).toHaveLength(2);
 		expect(pipeline.match(/harbor\.tailb18de3\.ts\.net\/linkedin-bot\/epyc-omp-workspace@sha256:2afa16d957719844939b2a45bad687e1e3cecf22abe23682e59972a076984e3f/g) ?? []).toHaveLength(2);
 		expect(pipeline.match(/HOME: \/tmp/g) ?? []).toHaveLength(2);
+		expect(pipeline.match(/BUN_INSTALL_CACHE_DIR: \/tmp\/bun-install-cache/g) ?? []).toHaveLength(2);
+		expect(pipeline.match(/CI_WORKSPACE_DIR: \/tmp\/omp-cmux-ci/g) ?? []).toHaveLength(2);
+		expect(pipeline.match(/cp -R \. "\$CI_WORKSPACE_DIR"/g) ?? []).toHaveLength(2);
+		expect(pipeline.match(/cd "\$CI_WORKSPACE_DIR"/g) ?? []).toHaveLength(2);
 		expect(pipeline).not.toMatch(/docker\.io|hostPath|privileged:\s*true/i);
 	});
 });
