@@ -18,6 +18,7 @@ const GROUP_STATUS_PREFIX = "omp_group";
 const STATUS_PRIORITY = "100";
 const TELEMETRY_INTERVAL_MS = 1_000;
 const MAX_NOTIFICATION_KEYS = 512;
+const DEFAULT_SHUTDOWN_SETTLE_MS = 2_000;
 const REMOTE_CUSTOM_TYPE = "cmux_remote_notification_v1";
 
 interface EventBusLike {
@@ -434,6 +435,7 @@ export function registerCmuxLifecycle(
 		hostname?: () => string;
 		forwardSshNotification?: typeof forwardSshDesktopNotification;
 		summaryGenerator?: WorkspaceSummaryGenerator;
+		shutdownSettleMs?: number;
 	} = {},
 ): () => Promise<void> {
 	const looseApi = api as unknown as ExtensionApiLike;
@@ -451,6 +453,10 @@ export function registerCmuxLifecycle(
 	const legacyGroupStatusKeys = WORKSPACE_GROUP_ORDER.map(group => scopedStatusKey("group", text(targetEnv.CMUX_SURFACE_ID), group));
 	const forwardSshNotification = options.forwardSshNotification ?? forwardSshDesktopNotification;
 	const now = options.now ?? Date.now;
+	const configuredShutdownSettleMs = options.shutdownSettleMs;
+	const shutdownSettleMs = configuredShutdownSettleMs !== undefined && Number.isFinite(configuredShutdownSettleMs) && configuredShutdownSettleMs >= 0
+		? configuredShutdownSettleMs
+		: DEFAULT_SHUTDOWN_SETTLE_MS;
 	const tuiRequested = Boolean(text(targetEnv.CMUX_TUI_SOCKET));
 	const rawTuiSurface = text(targetEnv.CMUX_TUI_SURFACE_ID);
 	let tuiSurface = rawTuiSurface && /^[1-9][0-9]*$/.test(rawTuiSurface) ? rawTuiSurface : undefined;
@@ -602,6 +608,19 @@ export function registerCmuxLifecycle(
 			structuredTuiReportsSupported = false;
 			await runReport(fallbackArgs);
 		}).catch(() => undefined);
+	};
+
+	const settleCommandTail = async (): Promise<void> => {
+		const pending = commandTail;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			await Promise.race([
+				pending,
+				new Promise<void>(resolve => { timer = setTimeout(resolve, shutdownSettleMs); }),
+			]);
+		} finally {
+			if (timer) clearTimeout(timer);
+		}
 	};
 
 	const remember = (key: string): boolean => {
@@ -855,7 +874,7 @@ export function registerCmuxLifecycle(
 		cleanupUi();
 		rootActive = false;
 		disposed = true;
-		await commandTail;
+		await settleCommandTail();
 		await Promise.allSettled(summaryRequests);
 	});
 
@@ -880,7 +899,7 @@ export function registerCmuxLifecycle(
 
 	return async () => {
 		if (disposed) {
-			await commandTail;
+			await settleCommandTail();
 			return;
 		}
 		if (lastContext) sendGuiHook("stop", lastContext);
@@ -891,7 +910,7 @@ export function registerCmuxLifecycle(
 		cleanupUi();
 		rootActive = false;
 		disposed = true;
-		await commandTail;
+		await settleCommandTail();
 		await Promise.allSettled(summaryRequests);
 	};
 }
