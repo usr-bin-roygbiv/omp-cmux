@@ -146,6 +146,7 @@ function formatSourceContract(backend: CmuxBackend, contract: CmuxSourceContract
 
 const TERMINAL_READ_RETRY_DELAYS_MS = [100, 300, 750, 2_000] as const;
 const TRANSIENT_TERMINAL_READ_ERROR = "Error: internal_error: Failed to read terminal text";
+const GUI_IDENTITY_PREFLIGHT_RETRY_DELAYS_MS = [50, 150] as const;
 
 function isTransientTerminalRead(result: CmuxToolResult): boolean {
 	const command = result.details.result;
@@ -276,38 +277,48 @@ async function requireExactGuiSurfaceType(
 	context: { backend: CmuxBackend; env: NodeJS.ProcessEnv },
 ): Promise<void> {
 	const exact = exactSurfaceTarget(target, context.env);
-	const preflight = await executeCommand(
+	const argv = ["--json", "--id-format", "both", "identify", "--workspace", exact.workspaceId, "--surface", exact.surfaceId];
+	let preflight = await executeCommand(
 		"surface:identity-preflight",
-		["--json", "--id-format", "both", "identify", "--workspace", exact.workspaceId, "--surface", exact.surfaceId],
+		argv,
 		timeoutMs,
 		signal,
 		runner,
 		context,
 		{ requireJson: true },
 	);
+	for (const delayMs of GUI_IDENTITY_PREFLIGHT_RETRY_DELAYS_MS) {
+		if (!preflight.isError || !(await waitForRetry(delayMs, signal))) break;
+		preflight = await executeCommand(
+			"surface:identity-preflight",
+			argv,
+			timeoutMs,
+			signal,
+			runner,
+			context,
+			{ requireJson: true },
+		);
+	}
 	if (preflight.isError) {
-		throw new TypeError(`cmux GUI exact-target preflight failed for workspace ${exact.workspaceId}, surface ${exact.surfaceId}: ${preflight.content[0]?.text ?? "identify failed"}`);
+		throw new TypeError("cmux GUI exact-target preflight failed: identity unavailable");
 	}
 	const record = guiSurfaceIdentityRecord(preflight.details.json);
 	if (!record) {
-		throw new TypeError(`cmux GUI exact-target preflight returned malformed identity for workspace ${exact.workspaceId}, surface ${exact.surfaceId}`);
+		throw new TypeError("cmux GUI exact-target preflight failed: malformed identity");
 	}
 	const identifiedWorkspaces = [record.workspace_id, record.workspace_ref]
 		.filter((value): value is string => typeof value === "string" && value.length > 0);
 	const identifiedSurfaces = [record.surface_id, record.surface_ref]
 		.filter((value): value is string => typeof value === "string" && value.length > 0);
 	if (identifiedWorkspaces.length === 0 || identifiedSurfaces.length === 0) {
-		throw new TypeError(`cmux GUI exact-target preflight returned malformed identity for workspace ${exact.workspaceId}, surface ${exact.surfaceId}: workspace and surface IDs or refs are required`);
+		throw new TypeError("cmux GUI exact-target preflight failed: malformed identity");
 	}
 	if (!identifiedWorkspaces.includes(exact.workspaceId) || !identifiedSurfaces.includes(exact.surfaceId)) {
-		throw new TypeError(`cmux GUI exact-target preflight mismatch: requested workspace ${exact.workspaceId}, surface ${exact.surfaceId}; identify returned workspaces ${identifiedWorkspaces.join(", ")}, surfaces ${identifiedSurfaces.join(", ")}`);
+		throw new TypeError("cmux GUI exact-target preflight failed: identity mismatch");
 	}
 	const identifiedType = normalizedGuiSurfaceType(record);
-	if (!identifiedType) {
-		throw new TypeError(`cmux GUI exact-target preflight returned a missing or unsupported surface type for workspace ${exact.workspaceId}, surface ${exact.surfaceId}; ${expectedType} is required`);
-	}
-	if (identifiedType.type !== expectedType) {
-		throw new TypeError(`cmux GUI exact-target preflight identified ${identifiedType.raw} surface ${exact.surfaceId}, but ${expectedType} is required`);
+	if (!identifiedType || identifiedType.type !== expectedType) {
+		throw new TypeError(`cmux GUI exact-target preflight failed: ${expectedType} surface is required`);
 	}
 }
 

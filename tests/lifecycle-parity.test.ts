@@ -119,6 +119,7 @@ function lifecycleHarness(env: NodeJS.ProcessEnv, options: {
 		...(options.forwardSshNotification === undefined ? {} : { forwardSshNotification: options.forwardSshNotification }),
 	});
 	return {
+		context,
 		calls,
 		entries,
 		intervals,
@@ -577,6 +578,36 @@ describe("runtime environment context", () => {
 		expect(harness.calls).toEqual([]);
 		await harness.dispose();
 	});
+	test("does not reuse a cached interactive root target in a later headless prompt", async () => {
+		const harness = lifecycleHarness(
+			{ PATH: process.env.PATH, PI_MACHINE_NAME: "zacbook", CMUX_WORKSPACE_ID: "workspace-root", CMUX_SURFACE_ID: "surface-root" },
+			{
+				platform: "darwin",
+				runResult(argv) {
+					if (argv.includes("identify")) {
+						return okResult(JSON.stringify({ caller: { workspace_id: "workspace-root", surface_id: "surface-root", surface_type: "terminal" } }));
+					}
+					return okResult();
+				},
+			},
+		);
+
+		const rootResults = await harness.emit("before_agent_start", { prompt: "Root", systemPrompt: ["base"] });
+		expect(JSON.stringify(rootResults)).toContain("Workspace: workspace-root");
+
+		const headlessResults = await harness.emit(
+			"before_agent_start",
+			{ prompt: "Delegated", systemPrompt: ["base"] },
+			{ ...harness.context, hasUI: false },
+		);
+		const serialized = JSON.stringify(headlessResults);
+		expect(serialized).toContain("Workspace: unavailable");
+		expect(serialized).toContain("Surface/tab: unavailable");
+		expect(serialized).not.toContain("workspace-root");
+		expect(serialized).not.toContain("surface-root");
+		await harness.dispose();
+	});
+
 });
 
 describe("semantic notifications", () => {

@@ -486,8 +486,7 @@ describe("typed cmux argv translation", () => {
 			options: {},
 		}]);
 		expect(result).toMatchObject({ isError: true, details: { operation: "validation" } });
-		expect(result.content[0]?.text).toMatch(/terminal/iu);
-		expect(result.content[0]?.text).toMatch(/browser/iu);
+		expect(result.content[0]?.text).toMatch(/browser surface is required/iu);
 	});
 
 	test("rejects a GUI terminal send when exact preflight identifies a browser surface", async () => {
@@ -509,8 +508,51 @@ describe("typed cmux argv translation", () => {
 			options: {},
 		}]);
 		expect(result).toMatchObject({ isError: true, details: { operation: "validation" } });
-		expect(result.content[0]?.text).toMatch(/browser/iu);
-		expect(result.content[0]?.text).toMatch(/terminal/iu);
+		expect(result.content[0]?.text).toMatch(/terminal surface is required/iu);
+	});
+
+	test("retries transient GUI identity command and JSON readiness failures before mutation", async () => {
+		const harness = toolHarness([
+			commandResult({ ok: false, exitCode: 1, stderr: "cmux is not ready", error: { code: "EXIT_ERROR", message: "identify failed" } }),
+			commandResult({ stdout: "not-json" }),
+			commandResult({
+				stdout: JSON.stringify({ caller: { workspace_id: "workspace-browser", surface_id: "surface-browser", surface_type: "browser" } }),
+			}),
+			commandResult({ stdout: "about:blank" }),
+		]);
+
+		const result = await execute(harness, "cmux_browser", {
+			action: "get_url",
+			workspace_id: "workspace-browser",
+			surface_id: "surface-browser",
+		});
+
+		expect(result.isError).toBe(false);
+		expect(harness.calls).toHaveLength(4);
+		expect(harness.calls.slice(0, 3).every(call => call.argv.includes("identify"))).toBe(true);
+	});
+
+	test("redacts requested targets and native output from GUI preflight failures", async () => {
+		const unsafeWorkspace = "/tmp/private.sock\n";
+		const staleSurface = "surface-stale-secret";
+		const harness = toolHarness(commandResult({
+			ok: false,
+			exitCode: 1,
+			stderr: `native failure for ${unsafeWorkspace} ${staleSurface}`,
+			error: { code: "EXIT_ERROR", message: `identify rejected ${unsafeWorkspace} ${staleSurface}` },
+		}), {
+			PATH: "/tools",
+			CMUX_WORKSPACE_ID: unsafeWorkspace,
+			CMUX_SURFACE_ID: staleSurface,
+			CMUX_OMP_BINARY: "cmux-test",
+		});
+
+		const result = await execute(harness, "cmux_browser", { action: "get_url" });
+		const message = result.content[0]?.text ?? "";
+		expect(result).toMatchObject({ isError: true, details: { operation: "validation" } });
+		expect(message).not.toContain("private.sock");
+		expect(message).not.toContain(staleSurface);
+		expect(message).not.toContain("native failure");
 	});
 
 	test("notifications target the requested surface rather than focused state", async () => {

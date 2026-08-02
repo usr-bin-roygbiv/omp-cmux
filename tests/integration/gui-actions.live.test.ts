@@ -96,14 +96,14 @@ liveTest(
 				text: "printf 'must-not-run\\n'\\n",
 			});
 			expect(rejectedTerminalAction.isError).toBe(true);
-			expect(rejectedTerminalAction.content[0]?.text).toContain("terminal is required");
+			expect(rejectedTerminalAction.content[0]?.text).toContain("terminal surface is required");
 			const rejectedBrowserAction = await invoke("cmux_browser", {
 				action: "snapshot",
 				workspace_id: workspaceId,
 				surface_id: surfaceId,
 			});
 			expect(rejectedBrowserAction.isError).toBe(true);
-			expect(rejectedBrowserAction.content[0]?.text).toContain("browser is required");
+			expect(rejectedBrowserAction.content[0]?.text).toContain("browser surface is required");
 		} finally {
 			if (browserSurface) {
 				await execute("cmux_surface", {

@@ -948,7 +948,7 @@ export function registerCmuxLifecycle(
 			requestWorkspaceSummary(text(record(event)?.prompt), ctx);
 			dispatch({ type: "agent-start" });
 		}
-		return runtimeSystemPrompt(event, ctx, backend, runtimeMachine, runtimePlatform, runtimeTarget());
+		return runtimeSystemPrompt(event, ctx, backend, runtimeMachine, runtimePlatform, ctx.hasUI === true ? runtimeTarget() : {});
 	});
 	on("agent_start", () => dispatch({ type: "turn-start" }));
 	on("turn_start", () => dispatch({ type: "turn-start" }));
