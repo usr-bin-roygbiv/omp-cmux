@@ -292,13 +292,15 @@ async function requireExactGuiSurfaceType(
 	if (!record) {
 		throw new TypeError(`cmux GUI exact-target preflight returned malformed identity for workspace ${exact.workspaceId}, surface ${exact.surfaceId}`);
 	}
-	const identifiedWorkspace = record.workspace_id;
-	const identifiedSurface = record.surface_id;
-	if (typeof identifiedWorkspace !== "string" || !identifiedWorkspace || typeof identifiedSurface !== "string" || !identifiedSurface) {
-		throw new TypeError(`cmux GUI exact-target preflight returned malformed identity for workspace ${exact.workspaceId}, surface ${exact.surfaceId}: workspace_id and surface_id are required`);
+	const identifiedWorkspaces = [record.workspace_id, record.workspace_ref]
+		.filter((value): value is string => typeof value === "string" && value.length > 0);
+	const identifiedSurfaces = [record.surface_id, record.surface_ref]
+		.filter((value): value is string => typeof value === "string" && value.length > 0);
+	if (identifiedWorkspaces.length === 0 || identifiedSurfaces.length === 0) {
+		throw new TypeError(`cmux GUI exact-target preflight returned malformed identity for workspace ${exact.workspaceId}, surface ${exact.surfaceId}: workspace and surface IDs or refs are required`);
 	}
-	if (identifiedWorkspace !== exact.workspaceId || identifiedSurface !== exact.surfaceId) {
-		throw new TypeError(`cmux GUI exact-target preflight mismatch: requested workspace ${exact.workspaceId}, surface ${exact.surfaceId}; identify returned workspace ${identifiedWorkspace}, surface ${identifiedSurface}`);
+	if (!identifiedWorkspaces.includes(exact.workspaceId) || !identifiedSurfaces.includes(exact.surfaceId)) {
+		throw new TypeError(`cmux GUI exact-target preflight mismatch: requested workspace ${exact.workspaceId}, surface ${exact.surfaceId}; identify returned workspaces ${identifiedWorkspaces.join(", ")}, surfaces ${identifiedSurfaces.join(", ")}`);
 	}
 	const identifiedType = normalizedGuiSurfaceType(record);
 	if (!identifiedType) {

@@ -435,6 +435,36 @@ describe("runtime environment context", () => {
 		await harness.dispose();
 	});
 
+	test("binds a GUI surface ref when both-format identity returns the exact ref and UUID", async () => {
+		const workspaceId = "E6391A6D-95EA-41CB-9B73-DFA192123FF9";
+		const harness = lifecycleHarness(
+			{ PATH: process.env.PATH, PI_MACHINE_NAME: "zacbook", CMUX_WORKSPACE_ID: workspaceId, CMUX_SURFACE_ID: "surface:483" },
+			{
+				platform: "darwin",
+				runResult(argv) {
+					if (argv.includes("identify")) {
+						return okResult(JSON.stringify({ caller: {
+							workspace_id: workspaceId,
+							workspace_ref: "workspace:12",
+							surface_id: "CF2DB995-7C1D-47AE-934D-7D9BD1ABAD63",
+							surface_ref: "surface:483",
+							surface_type: "browser",
+						} }));
+					}
+					return okResult();
+				},
+			},
+		);
+
+		const results = await harness.emit("before_agent_start", { prompt: "Browser target", systemPrompt: ["base"] });
+		const serialized = JSON.stringify(results);
+		expect(serialized).toContain(`Workspace: ${workspaceId}`);
+		expect(serialized).toContain("Surface/tab: surface:483");
+		expect(serialized).toContain("Surface type: browser");
+		expect(serialized).toContain("Tool route: cmux_browser");
+		await harness.dispose();
+	});
+
 	test("retries GUI exact identity after a transient preflight failure", async () => {
 		let identifyAttempts = 0;
 		const harness = lifecycleHarness(

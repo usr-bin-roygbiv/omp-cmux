@@ -233,7 +233,11 @@ function tuiTopologyTarget(output: string, surfaceId: string): TuiTopologyTarget
 function identifiedGuiSurfaceType(output: string, workspaceId: string, surfaceId: string): RuntimeSurfaceType | undefined {
 	const payload = record(parseCmuxJson<unknown>(output));
 	const identity = record(payload?.caller) ?? payload;
-	if (text(identity?.workspace_id) !== workspaceId || text(identity?.surface_id) !== surfaceId) return undefined;
+	const identifiedWorkspaces = [text(identity?.workspace_id), text(identity?.workspace_ref)]
+		.filter((value): value is string => value !== undefined);
+	const identifiedSurfaces = [text(identity?.surface_id), text(identity?.surface_ref)]
+		.filter((value): value is string => value !== undefined);
+	if (!identifiedWorkspaces.includes(workspaceId) || !identifiedSurfaces.includes(surfaceId)) return undefined;
 	return runtimeSurfaceType(identity?.surface_type ?? identity?.type ?? identity?.kind);
 }
 

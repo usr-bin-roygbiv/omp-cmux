@@ -445,6 +445,28 @@ describe("typed cmux argv translation", () => {
 		]);
 	});
 
+	test("accepts an exact GUI surface ref when both-format identify also returns its UUID", async () => {
+		const harness = toolHarness(argv => argv.includes("identify")
+			? commandResult({
+				stdout: JSON.stringify({ caller: {
+					workspace_id: "E6391A6D-95EA-41CB-9B73-DFA192123FF9",
+					workspace_ref: "workspace:12",
+					surface_id: "CF2DB995-7C1D-47AE-934D-7D9BD1ABAD63",
+					surface_ref: "surface:483",
+					surface_type: "browser",
+				} }),
+			})
+			: commandResult({ stdout: "about:blank" }));
+
+		const result = await execute(harness, "cmux_browser", {
+			action: "get_url",
+			workspace_id: "E6391A6D-95EA-41CB-9B73-DFA192123FF9",
+			surface_id: "surface:483",
+		});
+		expect(result.isError).toBe(false);
+		expect(harness.calls).toHaveLength(2);
+	});
+
 	test("rejects a GUI browser action when exact preflight identifies a terminal surface", async () => {
 		const harness = toolHarness([
 			commandResult({
