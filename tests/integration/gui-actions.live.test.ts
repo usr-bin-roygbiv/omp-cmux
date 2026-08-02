@@ -23,10 +23,13 @@ liveTest(
 			},
 		} as never);
 		const signal = new AbortController().signal;
-		const execute = async (name: string, params: unknown): Promise<ToolResult> => {
+		const invoke = async (name: string, params: unknown): Promise<ToolResult> => {
 			const tool = tools.get(name);
 			expect(tool, name).toBeDefined();
-			const result = await tool!.execute(`gui-${name}`, params, signal);
+			return await tool!.execute(`gui-${name}`, params, signal);
+		};
+		const execute = async (name: string, params: unknown): Promise<ToolResult> => {
+			const result = await invoke(name, params);
 			expect(result.isError, result.content[0]?.text).toBe(false);
 			return result;
 		};
@@ -85,6 +88,22 @@ liveTest(
 				surface_id: browserSurface,
 			});
 			expect(snapshot.content[0]?.text.length).toBeGreaterThan(0);
+
+			const rejectedTerminalAction = await invoke("cmux_surface", {
+				action: "send_text",
+				workspace_id: workspaceId,
+				surface_id: browserSurface,
+				text: "printf 'must-not-run\\n'\\n",
+			});
+			expect(rejectedTerminalAction.isError).toBe(true);
+			expect(rejectedTerminalAction.content[0]?.text).toContain("terminal is required");
+			const rejectedBrowserAction = await invoke("cmux_browser", {
+				action: "snapshot",
+				workspace_id: workspaceId,
+				surface_id: surfaceId,
+			});
+			expect(rejectedBrowserAction.isError).toBe(true);
+			expect(rejectedBrowserAction.content[0]?.text).toContain("browser is required");
 		} finally {
 			if (browserSurface) {
 				await execute("cmux_surface", {

@@ -50,6 +50,21 @@ type NotificationKind = "input" | "approval" | "plan" | "completion" | "blocked"
 type TuiAgentState = "working" | "blocked" | "idle" | "done" | "error" | "unknown";
 type CmuxBackend = "tui" | "gui";
 
+type RuntimeSurfaceType = "terminal" | "browser";
+type RuntimeToolRoute = "cmux_cli" | "cmux_surface" | "cmux_browser";
+
+interface RuntimeTarget {
+	workspace?: string;
+	surface?: string;
+	surfaceType?: RuntimeSurfaceType;
+	toolRoute?: RuntimeToolRoute;
+}
+
+interface TuiTopologyTarget {
+	workspace: string;
+	surfaceType: RuntimeSurfaceType;
+}
+
 interface WorkspaceSummaryRequest {
 	model: string;
 	maxChars: number;
@@ -119,20 +134,38 @@ function machineName(env: NodeJS.ProcessEnv, resolveHostname: () => string): str
 	return shortName.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
 }
 
-function runtimeSystemPrompt(event: unknown, ctx: ExtensionContext, backend: CmuxBackend, machine: string): { systemPrompt: string[] } {
+
+function runtimeSystemPrompt(
+	event: unknown,
+	ctx: ExtensionContext,
+	backend: CmuxBackend,
+	machine: string,
+	platform: NodeJS.Platform,
+	target: RuntimeTarget,
+): { systemPrompt: string[] } {
 	const configuredPrompt = record(event)?.systemPrompt;
 	const parts = Array.isArray(configuredPrompt)
-		? configuredPrompt.filter((part): part is string => typeof part === "string" && !part.startsWith(RUNTIME_ENVIRONMENT_OPEN))
+		? configuredPrompt.filter((part): part is string => typeof part === "string")
 		: [];
 	const interfaceLabel = ctx.hasUI === true
 		? `cmux ${backend.toUpperCase()}`
 		: `headless agent under cmux ${backend.toUpperCase()}`;
-	return {
-		systemPrompt: [
-			...parts,
-			`${RUNTIME_ENVIRONMENT_OPEN}\nMachine: ${machine}\nOMP interface: ${interfaceLabel}\n</runtime-environment>`,
-		],
-	};
+	const systemPrompt = [...parts];
+	if (!parts.some(part => part.includes(RUNTIME_ENVIRONMENT_OPEN))) {
+		systemPrompt.push(`${RUNTIME_ENVIRONMENT_OPEN}\nMachine: ${machine}\nOMP interface: ${interfaceLabel}\n</runtime-environment>`);
+	}
+	systemPrompt.push([
+		"<cmux-runtime-target>",
+		`Machine: ${machine}`,
+		`System: ${platform}`,
+		`Backend: ${backend}`,
+		`Workspace: ${target.workspace ?? "unavailable"}`,
+		`Surface/tab: ${target.surface ?? "unavailable"}`,
+		`Surface type: ${target.surfaceType ?? "unavailable"}`,
+		`Tool route: ${target.toolRoute ?? "unavailable"}`,
+		"</cmux-runtime-target>",
+	].join("\n"));
+	return { systemPrompt };
 }
 
 function tuiSurfaceIds(output: string): string[] {
@@ -152,6 +185,60 @@ function tuiSurfaceIds(output: string): string[] {
 function tuiProcessPid(output: string): number | undefined {
 	const pid = number(record(parseCmuxJson<unknown>(output))?.pid);
 	return pid !== undefined && Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+}
+
+function topologyTuiId(value: unknown): string | undefined {
+	if (typeof value === "number") {
+		return Number.isSafeInteger(value) && value > 0 ? String(value) : undefined;
+	}
+	const candidate = text(value);
+	return candidate && /^[1-9][0-9]*$/.test(candidate) ? candidate : undefined;
+}
+
+function runtimeSurfaceType(value: unknown): RuntimeSurfaceType | undefined {
+	const kind = text(value)?.toLowerCase();
+	if (kind === "pty" || kind === "terminal" || kind === "agent-session") return "terminal";
+	if (kind === "browser" || kind === "webview") return "browser";
+	return undefined;
+}
+
+function tuiTopologyTarget(output: string, surfaceId: string): TuiTopologyTarget | undefined {
+	const payload = record(parseCmuxJson<unknown>(output));
+	if (!Array.isArray(payload?.workspaces)) return undefined;
+	let match: TuiTopologyTarget | undefined;
+	let matchCount = 0;
+	for (const workspaceValue of payload.workspaces) {
+		const workspace = record(workspaceValue);
+		const workspaceId = topologyTuiId(workspace?.id);
+		if (!workspaceId || !Array.isArray(workspace?.screens)) continue;
+		for (const screenValue of workspace.screens) {
+			const screen = record(screenValue);
+			if (!Array.isArray(screen?.panes)) continue;
+			for (const paneValue of screen.panes) {
+				const pane = record(paneValue);
+				if (!Array.isArray(pane?.tabs)) continue;
+				for (const tabValue of pane.tabs) {
+					const tab = record(tabValue);
+					if (topologyTuiId(tab?.surface) !== surfaceId) continue;
+					matchCount += 1;
+					const surfaceType = runtimeSurfaceType(tab?.kind);
+					if (surfaceType) match = { workspace: workspaceId, surfaceType };
+				}
+			}
+		}
+	}
+	return matchCount === 1 ? match : undefined;
+}
+
+function identifiedGuiSurfaceType(output: string, workspaceId: string, surfaceId: string): RuntimeSurfaceType | undefined {
+	const payload = record(parseCmuxJson<unknown>(output));
+	const identity = record(payload?.caller) ?? payload;
+	const identifiedWorkspaces = [text(identity?.workspace_id), text(identity?.workspace_ref)]
+		.filter((value): value is string => value !== undefined);
+	const identifiedSurfaces = [text(identity?.surface_id), text(identity?.surface_ref)]
+		.filter((value): value is string => value !== undefined);
+	if (!identifiedWorkspaces.includes(workspaceId) || !identifiedSurfaces.includes(surfaceId)) return undefined;
+	return runtimeSurfaceType(identity?.surface_type ?? identity?.type ?? identity?.kind);
 }
 
 function messageRole(event: unknown): string | undefined {
@@ -433,6 +520,7 @@ export function registerCmuxLifecycle(
 		pid?: number;
 		ppid?: number;
 		hostname?: () => string;
+		platform?: NodeJS.Platform;
 		forwardSshNotification?: typeof forwardSshDesktopNotification;
 		summaryGenerator?: WorkspaceSummaryGenerator;
 		shutdownSettleMs?: number;
@@ -448,7 +536,7 @@ export function registerCmuxLifecycle(
 	const summaryRequests = new Set<Promise<void>>();
 	const summaryGenerator = options.summaryGenerator ?? generateWorkspaceSummary;
 	const runner = options.run ?? runCmux;
-	const targetEnv: NodeJS.ProcessEnv = { ...(options.env ?? process.env) };
+	const targetEnv: NodeJS.ProcessEnv = options.env ?? process.env;
 	const countStatusKey = scopedStatusKey("group", text(targetEnv.CMUX_SURFACE_ID), "counts");
 	const legacyGroupStatusKeys = WORKSPACE_GROUP_ORDER.map(group => scopedStatusKey("group", text(targetEnv.CMUX_SURFACE_ID), group));
 	const forwardSshNotification = options.forwardSshNotification ?? forwardSshDesktopNotification;
@@ -459,14 +547,33 @@ export function registerCmuxLifecycle(
 		: DEFAULT_SHUTDOWN_SETTLE_MS;
 	const tuiRequested = Boolean(text(targetEnv.CMUX_TUI_SOCKET));
 	const rawTuiSurface = text(targetEnv.CMUX_TUI_SURFACE_ID);
-	let tuiSurface = rawTuiSurface && /^[1-9][0-9]*$/.test(rawTuiSurface) ? rawTuiSurface : undefined;
+	const rawTuiWorkspace = text(targetEnv.CMUX_TUI_WORKSPACE_ID);
+	const tuiIdentityRejected = Boolean(
+		(rawTuiSurface && !/^[1-9][0-9]*$/.test(rawTuiSurface))
+		|| (rawTuiWorkspace && !/^[1-9][0-9]*$/.test(rawTuiWorkspace)),
+	);
+	const candidateTuiSurface = rawTuiSurface && /^[1-9][0-9]*$/.test(rawTuiSurface) ? rawTuiSurface : undefined;
+	const candidateTuiWorkspace = rawTuiWorkspace && /^[1-9][0-9]*$/.test(rawTuiWorkspace) ? rawTuiWorkspace : undefined;
+	let tuiSurface: string | undefined;
+	let tuiWorkspace: string | undefined;
+	let resolvedTuiSurfaceType: RuntimeSurfaceType | undefined;
 	const backend: CmuxBackend = tuiRequested ? "tui" : "gui";
 	const runtimeMachine = machineName(targetEnv, options.hostname ?? systemHostname);
+	const runtimePlatform = options.platform ?? process.platform;
+	let guiWorkspaceId: string | undefined;
+	let guiSurfaceId: string | undefined;
+	let capturedGuiSurfaceArgs: string[] | undefined;
 	let workspaceArgs: string[] | undefined;
 	let surfaceArgs: string[] | undefined;
+	let resolvedGuiSurfaceType: RuntimeSurfaceType | undefined;
 	if (backend === "gui") {
-		try { workspaceArgs = exactTargetArgs({}, "workspace", targetEnv); } catch { workspaceArgs = undefined; }
-		try { surfaceArgs = exactTargetArgs({}, "surface", targetEnv); } catch { surfaceArgs = undefined; }
+		try {
+			capturedGuiSurfaceArgs = exactTargetArgs({}, "surface", targetEnv);
+			guiWorkspaceId = capturedGuiSurfaceArgs[1];
+			guiSurfaceId = capturedGuiSurfaceArgs[3];
+		} catch {
+			capturedGuiSurfaceArgs = undefined;
+		}
 	}
 	const mainStatusKey = scopedStatusKey("session", text(targetEnv.CMUX_SURFACE_ID));
 	let lastContext: ExtensionContext | undefined;
@@ -478,6 +585,7 @@ export function registerCmuxLifecycle(
 	let lastTuiReport: string | undefined;
 	let commandTail = Promise.resolve();
 	let tuiSurfaceDiscovery: Promise<string | undefined> | undefined;
+	let guiTargetDiscovery: Promise<void> | undefined;
 	const tuiBinary = targetEnv.CMUX_OMP_TUI_BINARY?.trim() || "cmux-tui";
 	let structuredTuiReportsSupported: boolean | undefined;
 	let summaryTitle: string | undefined;
@@ -486,10 +594,49 @@ export function registerCmuxLifecycle(
 	let lastGuiProgressSignature: string | undefined;
 	let legacyGroupStatusesCleared = false;
 
+	const bindDiscoveredTuiSurface = async (surfaceId: string): Promise<string | undefined> => {
+		const topologyResult = await runner(["--json", "list-workspaces"], { env: targetEnv, binary: tuiBinary, platform: runtimePlatform });
+		if (!topologyResult.ok) return undefined;
+		let mapped: TuiTopologyTarget | undefined;
+		try {
+			mapped = tuiTopologyTarget(topologyResult.stdout, surfaceId);
+		} catch {
+			return undefined;
+		}
+		if (!mapped || (candidateTuiWorkspace && mapped.workspace !== candidateTuiWorkspace)) return undefined;
+		tuiWorkspace = mapped.workspace;
+		tuiSurface = surfaceId;
+		resolvedTuiSurfaceType = mapped.surfaceType;
+		targetEnv.CMUX_TUI_SURFACE_ID = surfaceId;
+		targetEnv.CMUX_TUI_WORKSPACE_ID = tuiWorkspace;
+		return surfaceId;
+	};
+
 	const discoverTuiSurface = async (): Promise<string | undefined> => {
-		if (tuiSurface || backend !== "tui") return tuiSurface;
-		tuiSurfaceDiscovery ??= (async () => {
-			const idsResult = await runner(["ids", "--json"], { env: targetEnv, binary: tuiBinary });
+		if (tuiSurface || backend !== "tui" || tuiIdentityRejected) return tuiSurface;
+		const discovery = tuiSurfaceDiscovery ??= (async () => {
+			const ownerPids = new Set(
+				[options.pid ?? process.pid, options.ppid ?? process.ppid]
+					.filter(pid => Number.isSafeInteger(pid) && pid > 0),
+			);
+			const isOwnedSurface = async (surfaceId: string): Promise<boolean> => {
+				const processResult = await runner(
+					["process-info", "--surface", surfaceId, "--json"],
+					{ env: targetEnv, binary: tuiBinary, platform: runtimePlatform },
+				);
+				if (!processResult.ok) return false;
+				try {
+					const pid = tuiProcessPid(processResult.stdout);
+					return pid !== undefined && ownerPids.has(pid);
+				} catch {
+					return false;
+				}
+			};
+			if (candidateTuiSurface) {
+				if (!await isOwnedSurface(candidateTuiSurface)) return undefined;
+				return await bindDiscoveredTuiSurface(candidateTuiSurface);
+			}
+			const idsResult = await runner(["ids", "--json"], { env: targetEnv, binary: tuiBinary, platform: runtimePlatform });
 			if (!idsResult.ok) return undefined;
 			let surfaceIds: string[];
 			try {
@@ -497,36 +644,64 @@ export function registerCmuxLifecycle(
 			} catch {
 				return undefined;
 			}
-			const ownerPids = new Set(
-				[options.pid ?? process.pid, options.ppid ?? process.ppid]
-					.filter(pid => Number.isSafeInteger(pid) && pid > 0),
-			);
 			const matches: string[] = [];
 			for (const surfaceId of surfaceIds) {
-				const processResult = await runner(
-					["process-info", "--surface", surfaceId, "--json"],
-					{ env: targetEnv, binary: tuiBinary },
-				);
-				if (!processResult.ok) continue;
-				try {
-					const pid = tuiProcessPid(processResult.stdout);
-					if (pid !== undefined && ownerPids.has(pid)) matches.push(surfaceId);
-				} catch {
-					// Malformed or stale surfaces are ignored; exact unique ownership is required.
-				}
+				if (await isOwnedSurface(surfaceId)) matches.push(surfaceId);
 			}
 			if (matches.length !== 1) return undefined;
-			tuiSurface = matches[0];
-			targetEnv.CMUX_TUI_SURFACE_ID = tuiSurface;
-			return tuiSurface;
+			return await bindDiscoveredTuiSurface(matches[0]!);
 		})();
-		return tuiSurfaceDiscovery;
+		const resolved = await discovery;
+		return resolved;
+	};
+
+	const discoverGuiTarget = async (): Promise<void> => {
+		if (backend !== "gui" || surfaceArgs || !capturedGuiSurfaceArgs || !guiWorkspaceId || !guiSurfaceId) return;
+		const discovery = guiTargetDiscovery ??= (async () => {
+			const identityResult = await runner(["--json", "--id-format", "both", "identify", ...capturedGuiSurfaceArgs!], { env: targetEnv, platform: runtimePlatform });
+			if (!identityResult.ok) return;
+			let surfaceType: RuntimeSurfaceType | undefined;
+			try {
+				surfaceType = identifiedGuiSurfaceType(identityResult.stdout, guiWorkspaceId!, guiSurfaceId!);
+			} catch {
+				return;
+			}
+			if (!surfaceType) return;
+			resolvedGuiSurfaceType = surfaceType;
+			workspaceArgs = ["--workspace", guiWorkspaceId!];
+			surfaceArgs = [...capturedGuiSurfaceArgs!];
+		})();
+		await discovery;
+		if (!surfaceArgs && guiTargetDiscovery === discovery) guiTargetDiscovery = undefined;
+	};
+
+	const resolveRuntimeTarget = async (): Promise<void> => {
+		if (backend === "tui") await discoverTuiSurface();
+		else await discoverGuiTarget();
+	};
+
+	const runtimeTarget = (): RuntimeTarget => {
+		if (backend === "tui") {
+			return {
+				...(tuiWorkspace ? { workspace: tuiWorkspace } : {}),
+				...(tuiSurface ? { surface: tuiSurface } : {}),
+				...(tuiSurface && resolvedTuiSurfaceType ? { surfaceType: resolvedTuiSurfaceType, toolRoute: "cmux_cli" as const } : {}),
+			};
+		}
+		return {
+			...(surfaceArgs && guiWorkspaceId ? { workspace: guiWorkspaceId } : {}),
+			...(surfaceArgs && guiSurfaceId ? { surface: guiSurfaceId } : {}),
+			...(surfaceArgs && resolvedGuiSurfaceType ? {
+				surfaceType: resolvedGuiSurfaceType,
+				toolRoute: resolvedGuiSurfaceType === "browser" ? "cmux_browser" as const : "cmux_surface" as const,
+			} : {}),
+		};
 	};
 
 	const enqueue = (args: string[], binary?: string, allowDisposed = false, commandOptions: { stdin?: string; cwd?: string; disableHooks?: boolean } = {}): void => {
 		if (!allowDisposed && disposed) return;
 		commandTail = commandTail.then(async () => {
-			await runner(args, { env: targetEnv, ...commandOptions, ...(binary ? { binary } : {}) });
+			await runner(args, { env: targetEnv, platform: runtimePlatform, ...commandOptions, ...(binary ? { binary } : {}) });
 		}).catch(() => undefined);
 	};
 
@@ -738,6 +913,7 @@ export function registerCmuxLifecycle(
 	};
 
 	const sessionStart = async (_event: unknown, ctx: ExtensionContext): Promise<void> => {
+		await resolveRuntimeTarget();
 		rootActive = true;
 		startedAtMs = now();
 		promptGenerationBySession.clear();
@@ -754,7 +930,6 @@ export function registerCmuxLifecycle(
 		}
 		sendGuiHook("session-start", ctx);
 		dispatch({ type: "session-start" });
-		if (backend === "tui") await discoverTuiSurface();
 		reportTui();
 		startTelemetry(ctx);
 	};
@@ -765,7 +940,7 @@ export function registerCmuxLifecycle(
 		lastContext = ctx;
 		if (ctx.hasUI === true) {
 			if (!rootActive) await sessionStart({ type: "session_start" }, ctx);
-			else if (backend === "tui" && !tuiSurface) await discoverTuiSurface();
+			else await resolveRuntimeTarget();
 			startTelemetry(ctx);
 			const sessionId = contextSessionId(ctx);
 			if (sessionId) promptGenerationBySession.set(sessionId, (promptGenerationBySession.get(sessionId) ?? 0) + 1);
@@ -773,7 +948,7 @@ export function registerCmuxLifecycle(
 			requestWorkspaceSummary(text(record(event)?.prompt), ctx);
 			dispatch({ type: "agent-start" });
 		}
-		return runtimeSystemPrompt(event, ctx, backend, runtimeMachine);
+		return runtimeSystemPrompt(event, ctx, backend, runtimeMachine, runtimePlatform, runtimeTarget());
 	});
 	on("agent_start", () => dispatch({ type: "turn-start" }));
 	on("turn_start", () => dispatch({ type: "turn-start" }));

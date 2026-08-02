@@ -149,7 +149,7 @@ export const CmuxBrowserSchema = Type.Object(
 		workspace_id: Type.Optional(Handle),
 		surface_id: Type.Optional(Handle),
 		window_id: Type.Optional(Handle),
-		arguments: Type.Optional(Type.Array(SafeString, { maxItems: 512, description: "Positional browser arguments. Use snapshot refs or standard CSS, never Playwright :has-text selectors. WKWebView does not support network requests or input_mouse." })),
+		arguments: Type.Optional(Type.Array(SafeString, { maxItems: 512, description: "Positional browser arguments. Use snapshot refs or standard CSS, never Playwright :has-text selectors. Check cmux_capabilities before engine-specific actions; never assume the current native cmux GUI engine." })),
 		timeout_ms: Timeout,
 	},
 	{ additionalProperties: false },

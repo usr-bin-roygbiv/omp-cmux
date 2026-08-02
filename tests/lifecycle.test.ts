@@ -77,6 +77,9 @@ function harness(options: { summaryGenerator?: SummaryGenerator } = {}) {
 	};
 	const run = async (argv: readonly string[], runOptions: CmuxRunOptions = {}) => {
 		calls.push({ argv: [...argv], options: runOptions });
+		if (argv.includes("identify")) {
+			return { ...okResult(), stdout: JSON.stringify({ caller: { workspace_id: "workspace-test", surface_id: "surface-test", surface_type: "terminal" } }) };
+		}
 		return okResult();
 	};
 	const dispose = registerCmuxLifecycle(api as never, {
@@ -613,6 +616,9 @@ describe("OMP lifecycle adapter", () => {
 		const dispose = registerCmuxLifecycle(api as never, {
 			run: async argv => {
 				calls.push([...argv]);
+				if (argv.includes("identify")) {
+					return { ...okResult(), stdout: JSON.stringify({ caller: { workspace_id: "workspace-test", surface_id: "surface-test", surface_type: "terminal" } }) };
+				}
 				if (blockFirst) {
 					blockFirst = false;
 					await firstCommand;
