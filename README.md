@@ -37,7 +37,7 @@ GUI registers five typed tools for common operations; TUI registers the four too
 
 - `cmux_workspace` — list, create, close, and rename workspaces in both backends, plus the complete GUI workspace action set.
 - `cmux_surface` — create, split, inspect, read, control, resume, and close GUI surfaces; TUI maps its supported subset to `list-workspaces`, `new-tab`, `split`, `read-screen`, `read-scrollback`, `send`, `send-key`, and `close-surface`.
-- `cmux_browser` — complete GUI WKWebView command coverage and exact TUI browser-tab creation through `new-browser-tab`. TUI does not expose GUI selector/DOM automation.
+- `cmux_browser` — complete GUI browser-command coverage for the current native cmux engine and exact TUI Chromium/CDP browser-tab creation through `new-browser-tab`. TUI does not expose GUI selector/DOM automation.
 - `cmux_notification` — native notifications in both backends; GUI additionally supports listing, dismissal, read state, opening, jumping, and clearing.
 - `cmux_sidebar` — GUI-only status, progress, logs, custom sidebars, and right-sidebar visibility. It is not registered in TUI; TUI sidebar plugins remain available through the raw CLI.
 
@@ -56,7 +56,7 @@ Typed operations also encode native contracts that are easy to misapply through 
 - Browser surfaces are created through `cmux_browser open` or `new`; GUI `cmux_surface create` rejects `type: browser`, while TUI browser creation requires an explicit `--pane` argument.
 - `cmux_surface send_key` normalizes common aliases such as `CTRL_B`, `C-b`, `CTRL_C`, `ESC`, `ENTER`, and `LEFT` to native positional key names.
 - Successful GUI typed closes report the requested workspace and surface rather than cmux's newly selected neighboring surface.
-- Targeted GUI browser actions validate both exact identities but pass the native leading `--surface` flag. Use `snapshot` and a returned ref or standard CSS; Playwright `:has-text` selectors and WKWebView `network`/`input_mouse` actions remain unsupported even though the upstream command registry exposes their names.
+- Targeted GUI browser actions validate both exact identities but pass the native leading `--surface` flag. Use `cmux_capabilities` before engine-specific actions, then use `snapshot` and a returned ref or standard CSS; Playwright `:has-text` selectors are unsupported.
 
 Prefer typed tools. For unavoidable GUI `cmux_cli` calls, use top-level `read-screen`, `close-surface`, and `list-panels`, plus positional `send-key KEY`. Do not invent `surface read`, `surface close`, `list-surfaces`, `--key`, or a command string without an argv array. Native `open` expects a local path rather than a `file://` URL; use browser navigation for URLs. TUI syntax is a separate, versioned CLI contract.
 

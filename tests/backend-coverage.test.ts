@@ -71,12 +71,12 @@ function commandResult(overrides: Partial<CmuxCommandResult> = {}): CmuxCommandR
 	};
 }
 
-function toolHarness(env: NodeJS.ProcessEnv, result: CmuxCommandResult = commandResult()) {
+function toolHarness(env: NodeJS.ProcessEnv, result: CmuxCommandResult | ((argv: readonly string[]) => CmuxCommandResult) = commandResult()) {
 	const tools = new Map<string, ToolDefinition>();
 	const calls: RunCall[] = [];
 	const run = async (argv: readonly string[], options: CmuxRunOptions = {}) => {
 		calls.push({ argv: [...argv], options });
-		return result;
+		return typeof result === "function" ? result(argv) : result;
 	};
 	registerCmuxTools({
 		registerTool(definition: ToolDefinition) {
@@ -143,12 +143,14 @@ describe("source-derived total command coverage", () => {
 		const actions = schema.properties.action.anyOf.map(entry => entry.const);
 		expect(actions).toEqual([...CMUX_GUI_BROWSER_ACTIONS]);
 		expect(actions).toHaveLength(63);
-		const harness = toolHarness(GUI_ENV);
+		const harness = toolHarness(GUI_ENV, argv => argv.includes("identify")
+			? commandResult({ stdout: JSON.stringify({ caller: { workspace_id: "workspace-gui", surface_id: "surface-gui", surface_type: "browser" } }) })
+			: commandResult());
 		for (const action of actions) {
 			const result = await execute(harness, "cmux_browser", { action, arguments: ["contract-argument"] });
 			expect(result.isError, action).toBe(false);
 		}
-		expect(harness.calls).toHaveLength(actions.length);
+		expect(harness.calls.filter(call => call.argv[1] === "browser")).toHaveLength(actions.length);
 		expect(harness.calls.every(call => call.options.binary === EXPECTED_GUI_BINARY)).toBe(true);
 	});
 
@@ -243,6 +245,22 @@ describe("TUI-aware typed tools", () => {
 		expect(actionNames(tui.tools.get("cmux_surface"))).toEqual(["list", "create", "split", "close", "identify", "read", "send_text", "send_key"]);
 		expect(actionNames(tui.tools.get("cmux_browser"))).toEqual(["open", "new"]);
 		expect(actionNames(tui.tools.get("cmux_notification"))).toEqual(["send"]);
+	});
+
+	test("keeps model-visible browser engine guidance backend-specific and capability-driven", () => {
+		const gui = toolHarness(GUI_ENV);
+		const guiContract = [...gui.tools.values()]
+			.map(tool => `${tool.description}\n${JSON.stringify(tool.parameters)}`)
+			.join("\n");
+		const guiBrowserDescription = gui.tools.get("cmux_browser")?.description ?? "";
+
+		expect(guiContract).not.toMatch(/WKWebView|WebKit|Chromium/iu);
+		expect(guiBrowserDescription).toMatch(/current native cmux GUI[^.]*engine/iu);
+		expect(guiBrowserDescription).toContain("cmux_capabilities");
+
+		const tuiBrowserDescription = toolHarness(TUI_ENV).tools.get("cmux_browser")?.description ?? "";
+		expect(tuiBrowserDescription).toMatch(/Chromium/iu);
+		expect(tuiBrowserDescription).toMatch(/CDP/iu);
 	});
 
 	test("translates exact workspace, surface, browser creation, and notification actions", async () => {

@@ -41,7 +41,7 @@ function commandResult(overrides: Partial<CmuxCommandResult> = {}): CmuxCommandR
 }
 
 function toolHarness(
-	result: CmuxCommandResult | CmuxCommandResult[] = commandResult(),
+	result: CmuxCommandResult | CmuxCommandResult[] | ((argv: readonly string[]) => CmuxCommandResult) = commandResult(),
 	env: NodeJS.ProcessEnv = {
 		PATH: "/tools",
 		CMUX_WORKSPACE_ID: "workspace-from-harness",
@@ -60,6 +60,7 @@ function toolHarness(
 	const run = async (argv: readonly string[], options: CmuxRunOptions = {}) => {
 		const { binary: _binary, env: _env, ...legacyOptions } = options;
 		calls.push({ argv: [...argv], options: legacyOptions });
+		if (typeof result === "function") return result(argv);
 		if (!Array.isArray(result)) return result;
 		const selected = result[Math.min(resultIndex, result.length - 1)];
 		resultIndex += 1;
@@ -280,7 +281,9 @@ describe("typed cmux argv translation", () => {
 	});
 
 	test("surface text and resume commands use an argv delimiter for user-controlled values", async () => {
-		const harness = toolHarness();
+		const harness = toolHarness(argv => argv.includes("identify")
+			? commandResult({ stdout: JSON.stringify({ caller: { workspace_id: "workspace-1", surface_id: "surface-1", surface_type: "terminal" } }) })
+			: commandResult());
 		await execute(harness, "cmux_surface", {
 			action: "send_text",
 			workspace_id: "workspace-1",
@@ -294,12 +297,14 @@ describe("typed cmux argv translation", () => {
 			resume_name: "worker",
 			command_argv: ["program", "argument with spaces", "$(still-not-run)"],
 		});
-		expect(harness.calls[0]?.argv.slice(-2)).toEqual(["--", "--help; not a command"]);
-		expect(harness.calls[1]?.argv.slice(-4)).toEqual(["--", "program", "argument with spaces", "$(still-not-run)"]);
+		expect(harness.calls[1]?.argv.slice(-2)).toEqual(["--", "--help; not a command"]);
+		expect(harness.calls[2]?.argv.slice(-4)).toEqual(["--", "program", "argument with spaces", "$(still-not-run)"]);
 	});
 
 	test("normalizes audited terminal key aliases to native positional key names", async () => {
-		const harness = toolHarness();
+		const harness = toolHarness(argv => argv.includes("identify")
+			? commandResult({ stdout: JSON.stringify({ caller: { workspace_id: "workspace-1", surface_id: "surface-1", surface_type: "terminal" } }) })
+			: commandResult());
 		for (const [key, expected] of [
 			["CTRL_B", "ctrl+b"],
 			["C-b", "ctrl+b"],
@@ -391,14 +396,20 @@ describe("typed cmux argv translation", () => {
 	});
 
 	test("browser surface automation retains nested argv and appends exact routing", async () => {
-		const harness = toolHarness();
+		const harness = toolHarness(argv => argv.includes("identify")
+			? commandResult({ stdout: JSON.stringify({ caller: { workspace_id: "workspace-browser", surface_id: "surface-browser", surface_type: "browser" } }) })
+			: commandResult());
 		await execute(harness, "cmux_browser", {
 			action: "fill",
 			arguments: ["#search", "two words"],
 			workspace_id: "workspace-browser",
 			surface_id: "surface-browser",
 		});
-		expect(harness.calls[0]?.argv).toEqual([
+		expect(harness.calls[0]?.argv).toEqual(["--json", "--id-format", "both", "identify", "--workspace",
+			"workspace-browser",
+			"--surface",
+			"surface-browser",]);
+		expect(harness.calls[1]?.argv).toEqual([
 			"--json",
 			"browser",
 			"--surface",
@@ -410,7 +421,9 @@ describe("typed cmux argv translation", () => {
 	});
 
 	test("routes targeted browser actions with the native leading surface flag and no unsupported workspace flag", async () => {
-		const harness = toolHarness();
+		const harness = toolHarness(argv => argv.includes("identify")
+			? commandResult({ stdout: JSON.stringify({ caller: { workspace_id: "workspace-browser", surface_id: "surface-browser", surface_type: "browser" } }) })
+			: commandResult());
 		await execute(harness, "cmux_browser", {
 			action: "navigate",
 			arguments: ["data:text/html,<button>ready</button>"],
@@ -418,7 +431,11 @@ describe("typed cmux argv translation", () => {
 			surface_id: "surface-browser",
 		});
 
-		expect(harness.calls[0]?.argv).toEqual([
+		expect(harness.calls[0]?.argv).toEqual(["--json", "--id-format", "both", "identify", "--workspace",
+			"workspace-browser",
+			"--surface",
+			"surface-browser",]);
+		expect(harness.calls[1]?.argv).toEqual([
 			"--json",
 			"browser",
 			"--surface",
@@ -426,6 +443,52 @@ describe("typed cmux argv translation", () => {
 			"navigate",
 			"data:text/html,<button>ready</button>",
 		]);
+	});
+
+	test("rejects a GUI browser action when exact preflight identifies a terminal surface", async () => {
+		const harness = toolHarness([
+			commandResult({
+				stdout: JSON.stringify({ caller: { workspace_id: "workspace-browser", surface_id: "surface-terminal", surface_type: "terminal" } }),
+			}),
+			commandResult({ stdout: "must not run" }),
+		]);
+		const result = await execute(harness, "cmux_browser", {
+			action: "navigate",
+			arguments: ["https://example.test"],
+			workspace_id: "workspace-browser",
+			surface_id: "surface-terminal",
+		});
+
+		expect(harness.calls).toEqual([{
+			argv: ["--json", "--id-format", "both", "identify", "--workspace", "workspace-browser", "--surface", "surface-terminal"],
+			options: {},
+		}]);
+		expect(result).toMatchObject({ isError: true, details: { operation: "validation" } });
+		expect(result.content[0]?.text).toMatch(/terminal/iu);
+		expect(result.content[0]?.text).toMatch(/browser/iu);
+	});
+
+	test("rejects a GUI terminal send when exact preflight identifies a browser surface", async () => {
+		const harness = toolHarness([
+			commandResult({
+				stdout: JSON.stringify({ caller: { workspace_id: "workspace-terminal", surface_id: "surface-browser", surface_type: "browser" } }),
+			}),
+			commandResult({ stdout: "must not run" }),
+		]);
+		const result = await execute(harness, "cmux_surface", {
+			action: "send_text",
+			workspace_id: "workspace-terminal",
+			surface_id: "surface-browser",
+			text: "printf 'must-not-run\\n'\\n",
+		});
+
+		expect(harness.calls).toEqual([{
+			argv: ["--json", "--id-format", "both", "identify", "--workspace", "workspace-terminal", "--surface", "surface-browser"],
+			options: {},
+		}]);
+		expect(result).toMatchObject({ isError: true, details: { operation: "validation" } });
+		expect(result.content[0]?.text).toMatch(/browser/iu);
+		expect(result.content[0]?.text).toMatch(/terminal/iu);
 	});
 
 	test("notifications target the requested surface rather than focused state", async () => {

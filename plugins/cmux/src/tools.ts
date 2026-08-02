@@ -219,6 +219,96 @@ async function executeCommand(
 	};
 }
 
+type GuiSurfaceType = "terminal" | "browser";
+
+function browserActionTargetsExistingSurface(action: CmuxBrowserInput["action"]): boolean {
+	switch (action) {
+		case "disable":
+		case "enable":
+		case "status":
+		case "profiles":
+		case "import":
+		case "open":
+		case "open_split":
+		case "new":
+			return false;
+		default:
+			return true;
+	}
+}
+
+
+function guiSurfaceIdentityRecord(value: unknown): Record<string, unknown> | undefined {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const root = value as Record<string, unknown>;
+	const caller = root.caller;
+	if (caller !== null && typeof caller === "object" && !Array.isArray(caller)) return caller as Record<string, unknown>;
+	return root;
+}
+
+function normalizedGuiSurfaceType(identity: Record<string, unknown>): { raw: string; type: GuiSurfaceType } | undefined {
+	let raw: string | undefined;
+	for (const key of ["type", "kind", "surface_type"] as const) {
+		const value = identity[key];
+		if (typeof value === "string" && value.trim()) {
+			raw = value.trim();
+			break;
+		}
+	}
+	if (raw === undefined) return undefined;
+	switch (raw.toLowerCase()) {
+		case "terminal":
+		case "pty":
+			return { raw, type: "terminal" };
+		case "browser":
+			return { raw, type: "browser" };
+		default:
+			return undefined;
+	}
+}
+
+async function requireExactGuiSurfaceType(
+	target: CmuxTarget,
+	expectedType: GuiSurfaceType,
+	timeoutMs: number | undefined,
+	signal: AbortSignal | undefined,
+	runner: Runner,
+	context: { backend: CmuxBackend; env: NodeJS.ProcessEnv },
+): Promise<void> {
+	const exact = exactSurfaceTarget(target, context.env);
+	const preflight = await executeCommand(
+		"surface:identity-preflight",
+		["--json", "--id-format", "both", "identify", "--workspace", exact.workspaceId, "--surface", exact.surfaceId],
+		timeoutMs,
+		signal,
+		runner,
+		context,
+		{ requireJson: true },
+	);
+	if (preflight.isError) {
+		throw new TypeError(`cmux GUI exact-target preflight failed for workspace ${exact.workspaceId}, surface ${exact.surfaceId}: ${preflight.content[0]?.text ?? "identify failed"}`);
+	}
+	const record = guiSurfaceIdentityRecord(preflight.details.json);
+	if (!record) {
+		throw new TypeError(`cmux GUI exact-target preflight returned malformed identity for workspace ${exact.workspaceId}, surface ${exact.surfaceId}`);
+	}
+	const identifiedWorkspace = record.workspace_id;
+	const identifiedSurface = record.surface_id;
+	if (typeof identifiedWorkspace !== "string" || !identifiedWorkspace || typeof identifiedSurface !== "string" || !identifiedSurface) {
+		throw new TypeError(`cmux GUI exact-target preflight returned malformed identity for workspace ${exact.workspaceId}, surface ${exact.surfaceId}: workspace_id and surface_id are required`);
+	}
+	if (identifiedWorkspace !== exact.workspaceId || identifiedSurface !== exact.surfaceId) {
+		throw new TypeError(`cmux GUI exact-target preflight mismatch: requested workspace ${exact.workspaceId}, surface ${exact.surfaceId}; identify returned workspace ${identifiedWorkspace}, surface ${identifiedSurface}`);
+	}
+	const identifiedType = normalizedGuiSurfaceType(record);
+	if (!identifiedType) {
+		throw new TypeError(`cmux GUI exact-target preflight returned a missing or unsupported surface type for workspace ${exact.workspaceId}, surface ${exact.surfaceId}; ${expectedType} is required`);
+	}
+	if (identifiedType.type !== expectedType) {
+		throw new TypeError(`cmux GUI exact-target preflight identified ${identifiedType.raw} surface ${exact.surfaceId}, but ${expectedType} is required`);
+	}
+}
+
 function workspaceArgv(input: CmuxWorkspaceInput, env: NodeJS.ProcessEnv): string[] {
 	const target = targetOf(input);
 	switch (input.action) {
@@ -383,6 +473,9 @@ async function executeSurfaceCommand(
 	context: { backend: CmuxBackend; env: NodeJS.ProcessEnv },
 ): Promise<CmuxToolResult> {
 	const argv = context.backend === "tui" ? tuiSurfaceArgv(input, context.env) : surfaceArgv(input, context.env);
+	if (context.backend === "gui" && (input.action === "send_text" || input.action === "send_key")) {
+		await requireExactGuiSurfaceType(targetOf(input), "terminal", input.timeout_ms, signal, runner, context);
+	}
 	let output = await executeCommand(`surface:${input.action}`, argv, input.timeout_ms, signal, runner, context, { parseJson: true });
 	if (input.action === "read") {
 		for (const delayMs of TERMINAL_READ_RETRY_DELAYS_MS) {
@@ -666,12 +759,15 @@ export function registerCmuxTools(api: ExtensionAPI, options: { run?: Runner; en
 	registerTool(api, {
 		name: "cmux_browser",
 		label: "cmux Browser",
-		description: isTuiBackend ? "Create an exact cmux TUI browser tab. DOM automation is unavailable on this backend." : "Use the complete cmux GUI WKWebView command set. Automation uses snapshot refs or standard CSS rather than :has-text; upstream network and input_mouse names remain discoverable but unsupported by WKWebView.",
+		description: isTuiBackend ? "Create an exact cmux TUI Chromium/CDP browser tab. DOM automation is unavailable on this backend." : "Use the complete command set for the current native cmux GUI browser engine. Call cmux_capabilities before engine-specific network or input_mouse actions; automation uses snapshot refs or standard CSS rather than :has-text.",
 		parameters: isTuiBackend ? actionSubsetSchema(CmuxBrowserSchema, ["open", "new"]) : CmuxBrowserSchema,
 		async execute(_id, params: CmuxBrowserInput, signal) {
 			try {
 				const context = toolContext(env);
 				const argv = context.backend === "tui" ? tuiBrowserArgv(params) : browserArgv(params, env);
+				if (context.backend === "gui" && browserActionTargetsExistingSurface(params.action)) {
+					await requireExactGuiSurfaceType(targetOf(params), "browser", params.timeout_ms, signal, runner, context);
+				}
 				return await executeCommand(`browser:${params.action}`, argv, params.timeout_ms, signal, runner, context, { parseJson: true });
 			} catch (error) {
 				return failureResult(error instanceof Error ? error.message : "invalid browser action");
