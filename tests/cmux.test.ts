@@ -104,6 +104,29 @@ describe("safe cmux process execution", () => {
 		});
 	});
 
+	test("passes forwarded SSH and controller overrides only to the KVM profile", () => {
+		const safe = buildSafeEnvironment(
+			{
+				PATH: "/tools",
+				SSH_AUTH_SOCK: "/tmp/forwarded-agent.sock",
+				KVM_FLEET_BINARY: "/tools/kvm-zacbook",
+				JETKVM_TOOL_SSH_HOST: "zacbook",
+				GITHUB_TOKEN: "must-not-leak",
+			},
+			{},
+			true,
+			"kvm",
+		);
+
+		expect(safe).toEqual({
+			PATH: "/tools",
+			SSH_AUTH_SOCK: "/tmp/forwarded-agent.sock",
+			KVM_FLEET_BINARY: "/tools/kvm-zacbook",
+			JETKVM_TOOL_SSH_HOST: "zacbook",
+			CMUX_OMP_HOOKS_DISABLED: "1",
+		});
+	});
+
 	test("spawns the selected executable directly and preserves hostile-looking values as single argv entries", async () => {
 		const seen = observation();
 		const hostile = "surface; printf should-not-run | $(also-not-run)";

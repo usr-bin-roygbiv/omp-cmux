@@ -40,6 +40,18 @@ const SAFE_ENVIRONMENT_KEYS = new Set([
 	"CMUX_MUX_SOCKET",
 ]);
 
+const KVM_ENVIRONMENT_KEYS = new Set([
+	"SSH_AUTH_SOCK",
+	"KVM_FLEET_BINARY",
+	"JETKVM_TOOL_SSH_HOST",
+	"JETKVM_TOOL_SSH_PORT",
+	"JETKVM_TOOL_SSH_USER",
+	"JETKVM_TOOL_SSH_BIN",
+	"JETKVM_TOOL_REMOTE_CLI",
+	"JETKVM_TOOL_REMOTE_PYTHON",
+	"JETKVM_TOOL_REMOTE_REPO",
+]);
+
 export type CmuxBackend = "gui" | "tui";
 
 export interface CmuxTarget {
@@ -57,6 +69,8 @@ export interface CmuxRunOptions {
 	cwd?: string;
 	/** Environment source. Only the fixed allowlist is inherited by the child. */
 	env?: NodeJS.ProcessEnv;
+	/** Select a fixed child environment profile; arbitrary environment-key extension is prohibited. */
+	environmentProfile?: "cmux" | "kvm";
 	/** Keep native cmux OMP hooks enabled for commands such as semantic notification delivery. */
 	disableHooks?: boolean;
 	/** Test seam; production callers should use the default direct process spawner. */
@@ -173,11 +187,18 @@ export function buildSafeEnvironment(
 	source: NodeJS.ProcessEnv = process.env,
 	overrides: NodeJS.ProcessEnv = {},
 	disableHooks = true,
+	profile: "cmux" | "kvm" = "cmux",
 ): NodeJS.ProcessEnv {
 	const safe: NodeJS.ProcessEnv = {};
 	for (const key of SAFE_ENVIRONMENT_KEYS) {
 		const value = overrides[key] ?? source[key];
 		if (value !== undefined && !value.includes("\0")) safe[key] = value;
+	}
+	if (profile === "kvm") {
+		for (const key of KVM_ENVIRONMENT_KEYS) {
+			const value = overrides[key] ?? source[key];
+			if (value !== undefined && !value.includes("\0")) safe[key] = value;
+		}
 	}
 	// Prevent cmux from also running legacy OMP hooks unless the command intentionally delivers one.
 	if (disableHooks) safe.CMUX_OMP_HOOKS_DISABLED = "1";
@@ -332,7 +353,12 @@ export async function runCmux(args: readonly string[], options: CmuxRunOptions =
 		try {
 			child = spawnImpl(binary, [...args], {
 				cwd: options.cwd,
-				env: buildSafeEnvironment(options.env ?? process.env, {}, options.disableHooks !== false),
+				env: buildSafeEnvironment(
+					options.env ?? process.env,
+					{},
+					options.disableHooks !== false,
+					options.environmentProfile,
+				),
 				stdio: ["pipe", "pipe", "pipe"],
 				shell: false,
 				windowsHide: true,
