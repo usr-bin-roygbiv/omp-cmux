@@ -47,6 +47,17 @@ GUI registers three escape hatches; TUI registers the two backed by its CLI:
 - `cmux_rpc` invokes arbitrary GUI JSON-RPC methods. It is not registered in TUI because the TUI has no JSON-RPC endpoint.
 - `cmux_cli` runs an explicit argument vector against the detected backend binary without a shell. It covers every source-listed GUI command and every TUI CLI verb, including future commands before a typed mapping exists.
 
+The same reviewed plugin also registers six fleet KVM tools when the root has a complete captured cmux GUI route or a cmux TUI socket whose lifecycle discovery can bind one exact process-owned workspace and surface. Missing GUI identities do not register the tools. Missing, mixed, invalid, stale, or ambiguous TUI identities fail every tool call before the remote controller executes. OMP 17.1.6 validates `--tools` against built-ins before extension registration and `--print` is headless, so validate these root/UI-only tools in a real interactive OMP surface rather than filtering a plugin tool through headless print mode.
+
+- `kvm_inventory` — read the Git-backed remote-machine, SSH, and JetKVM inventory.
+- `kvm_device` — ping, identify, inspect video, check, or wake an exact configured JetKVM device.
+- `kvm_capture` — save one exact remote frame for visual confirmation.
+- `kvm_input` — send bounded key, combo, text, mouse, click, double-click, or scroll input to an exact remote target.
+- `kvm_storage` — list, inspect, mount, or unmount exact JetKVM virtual media.
+- `kvm_remote_mac` — inspect an exact remote Mac or run bounded JXA with the program on stdin and arguments separated from code.
+
+All six execute the Git-tracked Go `kvm-zacbook` controller through an explicit argument vector without a shell. They never target local `zacbook` input. `zacs-mbp-1` is the designated LinkedIn machine; external communication still requires exact user approval immediately before execution.
+
 Each tool returns readable content plus structured details. Failures are reported as tool errors, cancellation stops the child process, and captured output is bounded.
 
 Typed operations also encode native contracts that are easy to misapply through raw CLI calls:
