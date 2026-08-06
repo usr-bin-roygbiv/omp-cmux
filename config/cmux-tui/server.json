@@ -1,0 +1,8 @@
+{
+  "browser": {
+    "chrome_binary": "$HOME/.local/libexec/cmux-tui/google-chrome",
+    "mode": "headless",
+    "ephemeral": false,
+    "max_capture_megapixels": 2
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "browser": {
+    "chrome_binary": "/usr/bin/chromium",
+    "mode": "headless",
+    "ephemeral": true,
+    "max_capture_megapixels": 2
+  },
+  "machine_sidebar": {
+    "enabled": true,
+    "width": 22,
+    "max_width": 36
+  },
+  "machines": [
+    {
+      "id": "linux-host-central-browser",
+      "name": "linux-host browser",
+      "subtitle": "central browser runtime",
+      "transport": "ssh",
+      "host": "browser.internal.net",
+      "user": "user",
+      "session": "central-browser",
+      "binary": "$HOME/.local/bin/cmux"
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://raw.githubusercontent.com/usr-bin-roygbiv/cmux/main/web/data/cmux.schema.json",
+  "schemaVersion": 1,
+  "automation": {
+    "claudeCodeIntegration": true,
+    "cursorIntegration": true,
+    "geminiIntegration": true,
+    "portBase": 9100,
+    "portRange": 10,
+    "socketControlMode": "allowAll",
+    "suppressSubagentNotifications": true
+  },
+  "browser": {
+    "defaultSearchEngine": "google",
+    "discardHiddenWebViews": true,
+    "hiddenWebViewDiscardDelaySeconds": 300,
+    "insecureHttpHostsAllowedInEmbeddedBrowser": [
+      "localhost",
+      "*.localhost",
+      "127.0.0.1",
+      "::1",
+      "0.0.0.0",
+      "*.localtest.me",
+      "*.internal.net"
+    ],
+    "interceptTerminalOpenCommandInCmuxBrowser": true,
+    "openTerminalLinksInCmuxBrowser": true,
+    "reactGrabVersion": "0.1.29",
+    "showImportHintOnBlankTabs": true,
+    "showSearchSuggestions": true,
+    "theme": "system"
+  },
+  "notifications": {
+    "agentIdleReminder": false,
+    "agentTurnComplete": "whenIdle"
+  },
+  "sidebar": {
+    "hideAllDetails": false,
+    "showAgentActivity": true,
+    "showBranchDirectory": false,
+    "showCustomMetadata": true,
+    "showLog": true,
+    "showNotificationMessage": true,
+    "showPorts": false,
+    "showProgress": true,
+    "showPullRequests": false,
+    "showSSH": false,
+    "watchGitStatus": false
+  },
+  "shortcuts": {
+    "bindings": {
+      "focusDown": "cmd+shift+j",
+      "focusLeft": null,
+      "focusRight": "cmd+;",
+      "focusUp": "cmd+shift+k",
+      "openBrowser": "cmd+r",
+      "browserReload": null,
+      "toggleFileExplorer": "cmd+l"
+    },
+    "showModifierHoldHints": true
+  },
+  "terminal": {
+    "autoResumeAgentSessions": false
+  }
+}

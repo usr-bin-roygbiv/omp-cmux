@@ -245,7 +245,7 @@ describe("TUI lifecycle backend", () => {
 				pid: 4_101,
 				ppid: 4_100,
 				now: 1_700_000_000_123,
-				hostname: () => "davailocal",
+				hostname: () => "linux-host",
 				platform: "linux",
 				runResult(argv) {
 					if (argv[0] === "ids") {
@@ -279,8 +279,8 @@ describe("TUI lifecycle backend", () => {
 		expect(runtimeResults).toEqual([{
 			systemPrompt: [
 				"base",
-				"<runtime-environment>\nMachine: davailocal\nOMP interface: cmux TUI\n</runtime-environment>",
-				"<cmux-runtime-target>\nMachine: davailocal\nSystem: linux\nBackend: tui\nWorkspace: 4\nSurface/tab: 18\nSurface type: terminal\nTool route: cmux_cli\n</cmux-runtime-target>",
+				"<runtime-environment>\nMachine: linux-host\nOMP interface: cmux TUI\n</runtime-environment>",
+				"<cmux-runtime-target>\nMachine: linux-host\nSystem: linux\nBackend: tui\nWorkspace: 4\nSurface/tab: 18\nSurface type: terminal\nTool route: cmux_cli\n</cmux-runtime-target>",
 			],
 		}]);
 
@@ -305,7 +305,7 @@ describe("TUI lifecycle backend", () => {
 			{
 				pid: 4_101,
 				ppid: 4_100,
-				hostname: () => "davailocal",
+				hostname: () => "linux-host",
 				platform: "linux",
 				runResult(argv) {
 					if (argv[0] === "ids") {
@@ -332,8 +332,8 @@ describe("TUI lifecycle backend", () => {
 		expect(runtimeResults).toEqual([{
 			systemPrompt: [
 				"base",
-				"<runtime-environment>\nMachine: davailocal\nOMP interface: cmux TUI\n</runtime-environment>",
-				"<cmux-runtime-target>\nMachine: davailocal\nSystem: linux\nBackend: tui\nWorkspace: unavailable\nSurface/tab: unavailable\nSurface type: unavailable\nTool route: unavailable\n</cmux-runtime-target>",
+				"<runtime-environment>\nMachine: linux-host\nOMP interface: cmux TUI\n</runtime-environment>",
+				"<cmux-runtime-target>\nMachine: linux-host\nSystem: linux\nBackend: tui\nWorkspace: unavailable\nSurface/tab: unavailable\nSurface type: unavailable\nTool route: unavailable\n</cmux-runtime-target>",
 			],
 		}]);
 		expect(JSON.stringify(runtimeResults)).not.toContain("/tmp/cmux-tui.sock");
@@ -404,7 +404,7 @@ describe("runtime environment context", () => {
 		const harness = lifecycleHarness(
 			{
 				PATH: process.env.PATH,
-				PI_MACHINE_NAME: "zacbook",
+				PI_MACHINE_NAME: "local-mac",
 				CMUX_WORKSPACE_ID: "workspace-gui",
 				CMUX_SURFACE_ID: "surface-gui",
 			},
@@ -428,7 +428,7 @@ describe("runtime environment context", () => {
 			systemPrompt: [
 				"base",
 				inheritedRuntime,
-				"<cmux-runtime-target>\nMachine: zacbook\nSystem: darwin\nBackend: gui\nWorkspace: workspace-gui\nSurface/tab: surface-gui\nSurface type: terminal\nTool route: cmux_surface\n</cmux-runtime-target>",
+				"<cmux-runtime-target>\nMachine: local-mac\nSystem: darwin\nBackend: gui\nWorkspace: workspace-gui\nSurface/tab: surface-gui\nSurface type: terminal\nTool route: cmux_surface\n</cmux-runtime-target>",
 			],
 		}]);
 		expect(results[0]).toMatchObject({ systemPrompt: expect.arrayContaining([inheritedRuntime]) });
@@ -439,7 +439,7 @@ describe("runtime environment context", () => {
 	test("binds a GUI surface ref when both-format identity returns the exact ref and UUID", async () => {
 		const workspaceId = "E6391A6D-95EA-41CB-9B73-DFA192123FF9";
 		const harness = lifecycleHarness(
-			{ PATH: process.env.PATH, PI_MACHINE_NAME: "zacbook", CMUX_WORKSPACE_ID: workspaceId, CMUX_SURFACE_ID: "surface:483" },
+			{ PATH: process.env.PATH, PI_MACHINE_NAME: "local-mac", CMUX_WORKSPACE_ID: workspaceId, CMUX_SURFACE_ID: "surface:483" },
 			{
 				platform: "darwin",
 				runResult(argv) {
@@ -469,7 +469,7 @@ describe("runtime environment context", () => {
 	test("retries GUI exact identity after a transient preflight failure", async () => {
 		let identifyAttempts = 0;
 		const harness = lifecycleHarness(
-			{ PATH: process.env.PATH, PI_MACHINE_NAME: "zacbook", CMUX_WORKSPACE_ID: "workspace-gui", CMUX_SURFACE_ID: "surface-gui" },
+			{ PATH: process.env.PATH, PI_MACHINE_NAME: "local-mac", CMUX_WORKSPACE_ID: "workspace-gui", CMUX_SURFACE_ID: "surface-gui" },
 			{
 				platform: "darwin",
 				runResult(argv) {
@@ -494,7 +494,7 @@ describe("runtime environment context", () => {
 	test("hides stale or unsafe GUI identities when exact preflight fails", async () => {
 		const unsafeWorkspace = "/tmp/private.sock\n";
 		const harness = lifecycleHarness(
-			{ PATH: process.env.PATH, PI_MACHINE_NAME: "zacbook", CMUX_WORKSPACE_ID: unsafeWorkspace, CMUX_SURFACE_ID: "surface-stale" },
+			{ PATH: process.env.PATH, PI_MACHINE_NAME: "local-mac", CMUX_WORKSPACE_ID: unsafeWorkspace, CMUX_SURFACE_ID: "surface-stale" },
 			{ platform: "darwin", runResult: () => okResult("{}") },
 		);
 
@@ -517,7 +517,7 @@ describe("runtime environment context", () => {
 				CMUX_WORKSPACE_ID: "workspace-stale",
 				CMUX_SURFACE_ID: "surface-stale",
 			},
-			{ hostname: () => "davailocal", platform: "linux" },
+			{ hostname: () => "linux-host", platform: "linux" },
 		);
 
 		const results = await harness.emit("before_agent_start", { prompt: "TUI prompt", systemPrompt: ["base"] });
@@ -525,8 +525,8 @@ describe("runtime environment context", () => {
 		expect(results).toEqual([{
 			systemPrompt: [
 				"base",
-				"<runtime-environment>\nMachine: davailocal\nOMP interface: cmux TUI\n</runtime-environment>",
-				"<cmux-runtime-target>\nMachine: davailocal\nSystem: linux\nBackend: tui\nWorkspace: 4\nSurface/tab: 17\nSurface type: terminal\nTool route: cmux_cli\n</cmux-runtime-target>",
+				"<runtime-environment>\nMachine: linux-host\nOMP interface: cmux TUI\n</runtime-environment>",
+				"<cmux-runtime-target>\nMachine: linux-host\nSystem: linux\nBackend: tui\nWorkspace: 4\nSurface/tab: 17\nSurface type: terminal\nTool route: cmux_cli\n</cmux-runtime-target>",
 			],
 		}]);
 		const serialized = JSON.stringify(results);
@@ -542,7 +542,7 @@ describe("runtime environment context", () => {
 			{
 				pid: 4_101,
 				ppid: 4_100,
-				hostname: () => "davailocal",
+				hostname: () => "linux-host",
 				platform: "linux",
 				runResult(argv) {
 					if (argv[0] === "process-info") return okResult(JSON.stringify({ pid: 4_100 }));
@@ -565,14 +565,14 @@ describe("runtime environment context", () => {
 	test("keeps headless interface context fail closed without native target queries", async () => {
 		const harness = lifecycleHarness(
 			{ PATH: process.env.PATH, CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock", CMUX_TUI_SURFACE_ID: "8", CMUX_TUI_WORKSPACE_ID: "6" },
-			{ hasUI: false, hostname: () => "epyc-omp-workspace", platform: "linux" },
+			{ hasUI: false, hostname: () => "autoresearch-host", platform: "linux" },
 		);
 		const results = await harness.emit("before_agent_start", { prompt: "Task", systemPrompt: ["base"] });
 		expect(results).toEqual([{
 			systemPrompt: [
 				"base",
-				"<runtime-environment>\nMachine: epyc-omp-workspace\nOMP interface: headless agent under cmux TUI\n</runtime-environment>",
-				"<cmux-runtime-target>\nMachine: epyc-omp-workspace\nSystem: linux\nBackend: tui\nWorkspace: unavailable\nSurface/tab: unavailable\nSurface type: unavailable\nTool route: unavailable\n</cmux-runtime-target>",
+				"<runtime-environment>\nMachine: autoresearch-host\nOMP interface: headless agent under cmux TUI\n</runtime-environment>",
+				"<cmux-runtime-target>\nMachine: autoresearch-host\nSystem: linux\nBackend: tui\nWorkspace: unavailable\nSurface/tab: unavailable\nSurface type: unavailable\nTool route: unavailable\n</cmux-runtime-target>",
 			],
 		}]);
 		expect(harness.calls).toEqual([]);
@@ -580,7 +580,7 @@ describe("runtime environment context", () => {
 	});
 	test("does not reuse a cached interactive root target in a later headless prompt", async () => {
 		const harness = lifecycleHarness(
-			{ PATH: process.env.PATH, PI_MACHINE_NAME: "zacbook", CMUX_WORKSPACE_ID: "workspace-root", CMUX_SURFACE_ID: "surface-root" },
+			{ PATH: process.env.PATH, PI_MACHINE_NAME: "local-mac", CMUX_WORKSPACE_ID: "workspace-root", CMUX_SURFACE_ID: "surface-root" },
 			{
 				platform: "darwin",
 				runResult(argv) {
@@ -614,7 +614,7 @@ describe("semantic notifications", () => {
 	test("uses native TUI notify and forwards SSH desktop notifications for semantic outcomes with exact dedupe", async () => {
 		const forwarded: ForwardedNotification[] = [];
 		const harness = lifecycleHarness(
-			{ PATH: process.env.PATH, HOSTNAME: "davailocal", CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock", CMUX_TUI_SURFACE_ID: "5", SSH_TTY: "/dev/pts/7" },
+			{ PATH: process.env.PATH, HOSTNAME: "linux-host", CMUX_TUI_SOCKET: "/tmp/cmux-tui.sock", CMUX_TUI_SURFACE_ID: "5", SSH_TTY: "/dev/pts/7" },
 			{ forwardSshNotification(notification) { forwarded.push(notification); return 1; } },
 		);
 		await harness.emit("before_agent_start", { prompt: "First prompt" });
@@ -656,7 +656,7 @@ describe("semantic notifications", () => {
 		]);
 		for (const argv of notifications) {
 			expect(argv).not.toContain("--subtitle");
-			expect(option(argv, "--body")).toContain("Session: davailocal · cmux TUI");
+			expect(option(argv, "--body")).toContain("Session: linux-host · cmux TUI");
 		}
 		for (const argv of notifications) expect(option(argv, "--surface")).toBe("5");
 		expect(forwarded.map(notification => notification.title)).toEqual([
@@ -666,7 +666,7 @@ describe("semantic notifications", () => {
 			"OMP needs your input",
 		]);
 		for (const notification of forwarded) {
-			expect(notification.body).toContain("Session: davailocal · cmux TUI");
+			expect(notification.body).toContain("Session: linux-host · cmux TUI");
 			expect(notification.body).not.toContain("Please choose a deployment.");
 		}
 		await harness.dispose();
@@ -736,7 +736,7 @@ describe("semantic notifications", () => {
 describe("GUI regression", () => {
 	test("retains exact GUI status and notify routing when the TUI socket is absent", async () => {
 		const harness = lifecycleHarness(
-			{ PATH: process.env.PATH, HOSTNAME: "zacbook", CMUX_WORKSPACE_ID: "workspace-gui", CMUX_SURFACE_ID: "surface-gui" },
+			{ PATH: process.env.PATH, HOSTNAME: "local-mac", CMUX_WORKSPACE_ID: "workspace-gui", CMUX_SURFACE_ID: "surface-gui" },
 			{
 				runResult(argv) {
 					if (argv.includes("identify")) {
@@ -754,7 +754,7 @@ describe("GUI regression", () => {
 		const notification = guiCalls(harness, "notify").at(-1)!.argv;
 		expect(notification).toContain("workspace-gui");
 		expect(notification).toContain("surface-gui");
-		expect(option(notification, "--subtitle")).toBe("Waiting · zacbook · GUI");
+		expect(option(notification, "--subtitle")).toBe("Waiting · local-mac · GUI");
 		expect(tuiCalls(harness, "report-agent")).toEqual([]);
 		await harness.dispose();
 	});

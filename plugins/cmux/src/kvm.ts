@@ -100,7 +100,7 @@ async function executeCommand(
 ): Promise<KvmToolResult> {
 	if (!hasCapturedCmuxRoute(env)) return failureResult("captured root cmux workspace and surface are unavailable");
 	const result = await runner(argv, {
-		binary: env.KVM_FLEET_BINARY?.trim() || "kvm-zacbook",
+		binary: env.KVM_FLEET_BINARY?.trim() || "kvm-fleet",
 		env,
 		environmentProfile: "kvm",
 		...(timeoutMs === undefined ? {} : { timeoutMs }),
@@ -168,7 +168,7 @@ export function registerKvmTools(api: ExtensionAPI, options: { run?: Runner; env
 	registerTool(api, {
 		name: "kvm_inventory",
 		label: "KVM Inventory",
-		description: "List the Git-backed remote-machine and JetKVM inventory. zacs-mbp-1 is the designated 16 GiB M2 Pro LinkedIn machine; alternate remote Macs are explicit test targets. This never controls local zacbook input.",
+		description: "List the Git-backed remote-machine and JetKVM inventory. remote-mac-1 is the designated 16 GiB M2 Pro remote-target machine; alternate remote Macs are explicit test targets. This never controls local local-mac input.",
 		approval: "read",
 		parameters: KvmInventorySchema,
 		async execute(_id, params: KvmInventoryInput, signal) {
@@ -179,7 +179,7 @@ export function registerKvmTools(api: ExtensionAPI, options: { run?: Runner; env
 	registerTool(api, {
 		name: "kvm_device",
 		label: "KVM Device",
-		description: "Check, identify, inspect video, ping, or wake a configured JetKVM-attached remote machine. Wake is remote state mutation and never local zacbook input.",
+		description: "Check, identify, inspect video, ping, or wake a configured JetKVM-attached remote machine. Wake is remote state mutation and never local local-mac input.",
 		approval: "write",
 		parameters: KvmDeviceSchema,
 		async execute(_id, params: KvmDeviceInput, signal) {
@@ -194,12 +194,12 @@ export function registerKvmTools(api: ExtensionAPI, options: { run?: Runner; env
 	registerTool(api, {
 		name: "kvm_capture",
 		label: "KVM Capture",
-		description: "Capture the exact JetKVM video frame from a remote machine to an absolute path on zacbook for visual confirmation, including LinkedIn confirmation on zacs-mbp-1.",
+		description: "Capture the exact JetKVM video frame from a remote machine to an absolute path on local-mac for visual confirmation, including remote-target confirmation on remote-mac-1.",
 		approval: "read",
 		parameters: KvmCaptureSchema,
 		async execute(_id, params: KvmCaptureInput, signal) {
 			try {
-				if (!required(params.output, "output").startsWith("/")) throw new TypeError("output must be an absolute zacbook path");
+				if (!required(params.output, "output").startsWith("/")) throw new TypeError("output must be an absolute local-mac path");
 				return await executeCommand("capture", ["capture", required(params.target, "target"), "--output", params.output], params.timeout_ms, signal, runner, env);
 			} catch (error) {
 				return failureResult(error instanceof Error ? error.message : "invalid capture action");
@@ -210,7 +210,7 @@ export function registerKvmTools(api: ExtensionAPI, options: { run?: Runner; env
 	registerTool(api, {
 		name: "kvm_input",
 		label: "KVM Input",
-		description: "Send bounded keyboard, text, mouse, click, or scroll HID input to an exact remote JetKVM target. Never targets local zacbook input; any LinkedIn mutation still requires exact user approval immediately before execution.",
+		description: "Send bounded keyboard, text, mouse, click, or scroll HID input to an exact remote JetKVM target. Never targets local local-mac input; any remote-target mutation still requires exact user approval immediately before execution.",
 		approval: "write",
 		parameters: KvmInputSchema,
 		async execute(_id, params: KvmInputInput, signal) {
@@ -225,7 +225,7 @@ export function registerKvmTools(api: ExtensionAPI, options: { run?: Runner; env
 	registerTool(api, {
 		name: "kvm_storage",
 		label: "KVM Storage",
-		description: "List, inspect, mount, or unmount virtual media on an exact remote JetKVM target. This never controls local zacbook input.",
+		description: "List, inspect, mount, or unmount virtual media on an exact remote JetKVM target. This never controls local local-mac input.",
 		approval: "write",
 		parameters: KvmStorageSchema,
 		async execute(_id, params: KvmStorageInput, signal) {
@@ -240,7 +240,7 @@ export function registerKvmTools(api: ExtensionAPI, options: { run?: Runner; env
 	registerTool(api, {
 		name: "kvm_remote_mac",
 		label: "Remote Mac",
-		description: "Inspect an exact remote Mac or run bounded JXA through osascript with the script on stdin. Use zacs-mbp-1 for LinkedIn and zacs-mbp-2/3 for non-LinkedIn tests. Never controls local zacbook input; external communication requires exact user approval immediately before execution.",
+		description: "Inspect an exact remote Mac or run bounded JXA through osascript with the script on stdin. Use remote-mac-1 for remote-target and remote-mac-2/3 for non-remote-target tests. Never controls local local-mac input; external communication requires exact user approval immediately before execution.",
 		approval: "write",
 		parameters: KvmRemoteMacSchema,
 		async execute(_id, params: KvmRemoteMacInput, signal) {

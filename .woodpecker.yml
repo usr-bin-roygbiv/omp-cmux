@@ -14,7 +14,7 @@ clone:
 
 steps:
   locked-omp-contract:
-    image: harbor.tailb18de3.ts.net/linkedin-bot/epyc-omp-workspace@sha256:2afa16d957719844939b2a45bad687e1e3cecf22abe23682e59972a076984e3f
+    image: oven/bun:1
     environment:
       HOME: /tmp
       BUN_INSTALL_CACHE_DIR: /tmp/bun-install-cache
@@ -41,7 +41,7 @@ steps:
 
   latest-omp-contract:
     depends_on: [locked-omp-contract]
-    image: harbor.tailb18de3.ts.net/linkedin-bot/epyc-omp-workspace@sha256:2afa16d957719844939b2a45bad687e1e3cecf22abe23682e59972a076984e3f
+    image: oven/bun:1
     environment:
       HOME: /tmp
       BUN_INSTALL_CACHE_DIR: /tmp/bun-install-cache

@@ -109,8 +109,8 @@ describe("safe cmux process execution", () => {
 			{
 				PATH: "/tools",
 				SSH_AUTH_SOCK: "/tmp/forwarded-agent.sock",
-				KVM_FLEET_BINARY: "/tools/kvm-zacbook",
-				JETKVM_TOOL_SSH_HOST: "zacbook",
+				KVM_FLEET_BINARY: "/tools/kvm-fleet",
+				JETKVM_TOOL_SSH_HOST: "local-mac",
 				GITHUB_TOKEN: "must-not-leak",
 			},
 			{},
@@ -121,8 +121,8 @@ describe("safe cmux process execution", () => {
 		expect(safe).toEqual({
 			PATH: "/tools",
 			SSH_AUTH_SOCK: "/tmp/forwarded-agent.sock",
-			KVM_FLEET_BINARY: "/tools/kvm-zacbook",
-			JETKVM_TOOL_SSH_HOST: "zacbook",
+			KVM_FLEET_BINARY: "/tools/kvm-fleet",
+			JETKVM_TOOL_SSH_HOST: "local-mac",
 			CMUX_OMP_HOOKS_DISABLED: "1",
 		});
 	});

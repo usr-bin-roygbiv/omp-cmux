@@ -3,8 +3,8 @@ function literals(values: readonly string[]) {
 }
 
 const timeout = { type: "integer", minimum: 1, maximum: 300_000 };
-const kvmTarget = literals(["zacs-mbp-1", "linkedin-mac", "zacs-mbp", "remote-mac", "faro-laptop"]);
-const remoteMacTarget = literals(["zacs-mbp-1", "zacs-mbp-2", "zacs-mbp-3"]);
+const kvmTarget = literals(["remote-mac-1", "remote-mac-1", "remote-mac-1", "remote-mac", "remote-mac-aux"]);
+const remoteMacTarget = literals(["remote-mac-1", "remote-mac-2", "remote-mac-3"]);
 
 export const KvmInventorySchema = {
 	type: "object",

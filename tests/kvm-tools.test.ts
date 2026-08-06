@@ -42,7 +42,7 @@ function harness(env: NodeJS.ProcessEnv = {
 	PATH: "/tools",
 	CMUX_WORKSPACE_ID: "workspace-1",
 	CMUX_SURFACE_ID: "surface-1",
-	KVM_FLEET_BINARY: "/tools/kvm-zacbook",
+	KVM_FLEET_BINARY: "/tools/kvm-fleet",
 	SSH_AUTH_SOCK: "/tmp/forwarded-agent.sock",
 }) {
 	const tools = new Map<string, ToolDefinition>();
@@ -123,13 +123,13 @@ describe("fleet-wide KVM tools", () => {
 		const subject = harness();
 		const controller = new AbortController();
 		await execute(subject, "kvm_inventory", {}, controller.signal);
-		await execute(subject, "kvm_device", { target: "linkedin-mac", action: "video" });
-		await execute(subject, "kvm_capture", { target: "zacs-mbp-1", output: "/tmp/proof.png" });
-		await execute(subject, "kvm_input", { target: "zacs-mbp-1", action: "text", text: "hello; still one arg" });
-		await execute(subject, "kvm_input", { target: "zacs-mbp-1", action: "combo", keys: ["cmd", "shift", "g"] });
-		await execute(subject, "kvm_storage", { target: "zacs-mbp-1", action: "mount-url", value: "https://example.test/test.iso" });
+		await execute(subject, "kvm_device", { target: "remote-mac-1", action: "video" });
+		await execute(subject, "kvm_capture", { target: "remote-mac-1", output: "/tmp/proof.png" });
+		await execute(subject, "kvm_input", { target: "remote-mac-1", action: "text", text: "hello; still one arg" });
+		await execute(subject, "kvm_input", { target: "remote-mac-1", action: "combo", keys: ["cmd", "shift", "g"] });
+		await execute(subject, "kvm_storage", { target: "remote-mac-1", action: "mount-url", value: "https://example.test/test.iso" });
 		await execute(subject, "kvm_remote_mac", {
-			target: "zacs-mbp-2",
+			target: "remote-mac-2",
 			action: "jxa",
 			script: "function run(argv) { return JSON.stringify(argv); }",
 			argument: '{"action":"status"}',
@@ -137,14 +137,14 @@ describe("fleet-wide KVM tools", () => {
 
 		expect(subject.calls.map((call) => call.argv)).toEqual([
 			["inventory", "--json"],
-			["device", "linkedin-mac", "video"],
-			["capture", "zacs-mbp-1", "--output", "/tmp/proof.png"],
-			["input", "zacs-mbp-1", "text", "hello; still one arg"],
-			["input", "zacs-mbp-1", "combo", "cmd", "shift", "g"],
-			["storage", "zacs-mbp-1", "mount-url", "https://example.test/test.iso"],
-			["mac", "zacs-mbp-2", "jxa", "--arg", '{"action":"status"}'],
+			["device", "remote-mac-1", "video"],
+			["capture", "remote-mac-1", "--output", "/tmp/proof.png"],
+			["input", "remote-mac-1", "text", "hello; still one arg"],
+			["input", "remote-mac-1", "combo", "cmd", "shift", "g"],
+			["storage", "remote-mac-1", "mount-url", "https://example.test/test.iso"],
+			["mac", "remote-mac-2", "jxa", "--arg", '{"action":"status"}'],
 		]);
-		expect(subject.calls[0]?.options).toMatchObject({ binary: "/tools/kvm-zacbook", signal: controller.signal });
+		expect(subject.calls[0]?.options).toMatchObject({ binary: "/tools/kvm-fleet", signal: controller.signal });
 		expect(subject.calls[0]?.options.environmentProfile).toBe("kvm");
 		expect(subject.calls.at(-1)?.options.stdin).toContain("function run");
 	});
@@ -152,12 +152,12 @@ describe("fleet-wide KVM tools", () => {
 	test("fails closed on incomplete action fields before execution", async () => {
 		const subject = harness();
 		const cases = [
-			["kvm_device", { target: "zacs-mbp-1", action: "wake" }],
-			["kvm_capture", { target: "zacs-mbp-1", output: "relative.png" }],
-			["kvm_input", { target: "zacs-mbp-1", action: "text" }],
-			["kvm_input", { target: "zacs-mbp-1", action: "click", x: 1 }],
-			["kvm_storage", { target: "zacs-mbp-1", action: "mount-local" }],
-			["kvm_remote_mac", { target: "zacs-mbp-2", action: "jxa" }],
+			["kvm_device", { target: "remote-mac-1", action: "wake" }],
+			["kvm_capture", { target: "remote-mac-1", output: "relative.png" }],
+			["kvm_input", { target: "remote-mac-1", action: "text" }],
+			["kvm_input", { target: "remote-mac-1", action: "click", x: 1 }],
+			["kvm_storage", { target: "remote-mac-1", action: "mount-local" }],
+			["kvm_remote_mac", { target: "remote-mac-2", action: "jxa" }],
 		] as const;
 		for (const [name, params] of cases) {
 			const result = await execute(subject, name, params);
@@ -167,13 +167,13 @@ describe("fleet-wide KVM tools", () => {
 		expect(subject.calls).toHaveLength(0);
 	});
 
-	test("documents LinkedIn safety and alternate-Mac visual control", () => {
+	test("documents remote-target safety and alternate-Mac visual control", () => {
 		const subject = harness();
 		const descriptions = [...subject.tools.values()].map((tool) => tool.description).join("\n");
-		expect(descriptions).toContain("zacs-mbp-1");
-		expect(descriptions).toContain("LinkedIn");
+		expect(descriptions).toContain("remote-mac-1");
+		expect(descriptions).toContain("remote-target");
 		expect(descriptions).toMatch(/exact user approval/i);
 		expect(descriptions).toMatch(/remote Mac/i);
-		expect(descriptions).toMatch(/never local zacbook input/i);
+		expect(descriptions).toMatch(/never local local-mac input/i);
 	});
 });

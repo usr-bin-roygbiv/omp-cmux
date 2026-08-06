@@ -56,7 +56,7 @@ The same reviewed plugin also registers six fleet KVM tools when the root has a 
 - `kvm_storage` — list, inspect, mount, or unmount exact JetKVM virtual media.
 - `kvm_remote_mac` — inspect an exact remote Mac or run bounded JXA with the program on stdin and arguments separated from code.
 
-All six execute the Git-tracked Go `kvm-zacbook` controller through an explicit argument vector without a shell. They never target local `zacbook` input. `zacs-mbp-1` is the designated LinkedIn machine; external communication still requires exact user approval immediately before execution.
+All six execute the Git-tracked Go `kvm-fleet` controller through an explicit argument vector without a shell. They never target local `local-mac` input. `remote-mac-1` is the designated remote-target machine; external communication still requires exact user approval immediately before execution.
 
 Each tool returns readable content plus structured details. Failures are reported as tool errors, cancellation stops the child process, and captured output is bounded.
 

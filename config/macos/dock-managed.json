@@ -1,0 +1,10 @@
+{
+  "controls": [
+    {
+      "id": "gemini-omp",
+      "title": "Gemini OMP",
+      "command": "source \"$HOME/.zshrc\" && exec omp --model google-antigravity/gemini-3.6-flash --thinking medium",
+      "cwd": "$HOME/projects"
+    }
+  ]
+}

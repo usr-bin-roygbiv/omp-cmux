@@ -302,7 +302,7 @@ describe("cluster update CI", () => {
 		expect(pipeline).toContain("serviceAccountName: woodpecker-ci-untrusted");
 		expect(pipeline.match(/ephemeral-storage: 512Mi/g) ?? []).toHaveLength(2);
 		expect(pipeline.match(/ephemeral-storage: 4Gi/g) ?? []).toHaveLength(2);
-		expect(pipeline.match(/harbor\.tailb18de3\.ts\.net\/linkedin-bot\/epyc-omp-workspace@sha256:2afa16d957719844939b2a45bad687e1e3cecf22abe23682e59972a076984e3f/g) ?? []).toHaveLength(2);
+		expect(pipeline.match(/image: oven\/bun:1/g) ?? []).toHaveLength(2);
 		expect(pipeline.match(/HOME: \/tmp/g) ?? []).toHaveLength(2);
 		expect(pipeline.match(/BUN_INSTALL_CACHE_DIR: \/tmp\/bun-install-cache/g) ?? []).toHaveLength(2);
 		expect(pipeline.match(/CI_WORKSPACE_DIR: \/tmp\/omp-cmux-ci/g) ?? []).toHaveLength(2);

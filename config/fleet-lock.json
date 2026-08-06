@@ -1,0 +1,148 @@
+{
+  "schemaVersion": "cmux-fleet-lock/v1",
+  "sourceRepository": "usr-bin-roygbiv/cmux",
+  "policy": {
+    "automaticUpgrade": false,
+    "verification": "exact version, build or package version, commit when available, and binary SHA-256 or npm integrity",
+    "promotion": "feature branch, tracked hooks, owned cmux smoke, merge to main, then host refresh"
+  },
+  "packageClosure": {
+    "version": "0.9.9",
+    "package": "cmux",
+    "integrity": "sha512-T/K1zJJwxswBNJjDQVd/pll7/3/9AyyWuWoR3bbKpuvh8xJK4Rej+rJMmB7ayw3NBEJNw5hhLCFDgJ9Kry/PrA==",
+    "platforms": {
+      "darwin-arm64": {
+        "package": "cmux-tui-darwin-arm64",
+        "version": "0.9.9",
+        "integrity": "sha512-fsOUCePlSlwhmXGTKodSyE65WZeS6dpNRyKP7v5EgFE4hfYNoyptMkylcM3fDA/kkcZYBFvtnt528nVjdVOnbQ=="
+      },
+      "darwin-x64": {
+        "package": "cmux-tui-darwin-x64",
+        "version": "0.9.9",
+        "integrity": "sha512-MC3YTIqzlZu/gpLbeGlLVNklxLbgyT8Ep62tYKhhk/6eE25kdTt3jUUSVT7pPRopUf91jcqWSfiV+iA6oFXVZQ=="
+      },
+      "linux-arm64": {
+        "package": "cmux-tui-linux-arm64",
+        "version": "0.9.9",
+        "integrity": "sha512-wEH84depRcivA7oCVvBqKFumA+iD4oCsbnKtq9n7dA6MRXJoE7wWBjLz3dpQ5PsrBsO+6rosLUdhwSin7R8HFQ=="
+      },
+      "linux-x64": {
+        "package": "cmux-tui-linux-x64",
+        "version": "0.9.9",
+        "integrity": "sha512-kdcqT9S0fx1HQRqa5/uQXfFyQUTA6JfcBCAVzbNRfS97HHKkDgt4sMCV0nbHWAAZrT2PxUqqqZxqZTqZBk/1RQ=="
+      }
+    }
+  },
+  "managedProfiles": {
+    "macos-default": {
+      "cmux": ".omp/cmux-fleet/macos/cmux-managed.json"
+    },
+    "local-mac": {
+      "cmux": ".omp/cmux-fleet/macos/cmux-managed.json",
+      "dock": "config/macos/dock-managed.json"
+    },
+    "linux-host": {
+      "client": ".omp/cmux-tui/client.json",
+      "server": ".omp/cmux-tui/linux-host-server.json"
+    },
+    "autoresearch-host": {
+      "client": ".omp/cmux-tui/autoresearch-client-client.json"
+    }
+  },
+  "hosts": {
+    "local-mac": {
+      "os": "darwin",
+      "arch": "arm64",
+      "role": "macos-gui",
+      "profile": "local-mac",
+      "desired": {
+        "kind": "native-app",
+        "version": "0.64.20",
+        "build": "100",
+        "commit": "69f7a8b92",
+        "sha256": "3890b42c64ee17e8daf6575168b2aef289304dec63bdb4304d3e44c98d3edd6e"
+      },
+      "observedAt": "2026-08-02",
+      "status": "matched"
+    },
+    "remote-mac-1": {
+      "os": "darwin",
+      "arch": "arm64",
+      "role": "remote-macos-browser",
+      "profile": "macos-default",
+      "desired": {
+        "kind": "native-app",
+        "version": "0.64.20",
+        "build": "100",
+        "commit": "14e3400b9",
+        "sha256": "27cbe25464cd891b3cf433f5a16629bbf836e891beadc49fb53a331db8a8617a"
+      },
+      "observedAt": "2026-08-02",
+      "status": "matched"
+    },
+    "remote-mac-2": {
+      "os": "darwin",
+      "arch": "arm64",
+      "role": "secondary-remote-macos",
+      "profile": "macos-default",
+      "desired": {
+        "kind": "native-app",
+        "version": "0.64.20",
+        "build": "100",
+        "commit": "14e3400b9",
+        "sha256": "27cbe25464cd891b3cf433f5a16629bbf836e891beadc49fb53a331db8a8617a"
+      },
+      "observedAt": "2026-08-02",
+      "status": "absent"
+    },
+    "remote-mac-3": {
+      "os": "darwin",
+      "arch": "arm64",
+      "role": "auxiliary-remote-macos-browser",
+      "profile": "macos-default",
+      "desired": {
+        "kind": "native-app",
+        "version": "0.64.20",
+        "build": "100",
+        "commit": "14e3400b9",
+        "sha256": "27cbe25464cd891b3cf433f5a16629bbf836e891beadc49fb53a331db8a8617a"
+      },
+      "observedAt": "2026-08-03",
+      "status": "unverified"
+    },
+    "linux-host": {
+      "os": "linux",
+      "arch": "x64",
+      "role": "linux-tui-central-host",
+      "profile": "linux-host",
+      "desired": {
+        "kind": "npm-package",
+        "package": "cmux-tui-linux-x64",
+        "version": "0.9.9",
+        "integrity": "sha512-kdcqT9S0fx1HQRqa5/uQXfFyQUTA6JfcBCAVzbNRfS97HHKkDgt4sMCV0nbHWAAZrT2PxUqqqZxqZTqZBk/1RQ=="
+      },
+      "observed": {
+        "kind": "native-binary",
+        "version": "0.1.0",
+        "commit": "ce84b6ffa0bc135adb5d5e6b520068b244c974c2",
+        "sha256": "25a864a1cab5e988a2a5a2bd46a2ad2c61f8763d7f3f67fcf8fc6ee45e5b9a69"
+      },
+      "observedAt": "2026-08-02",
+      "status": "drift-recorded"
+    },
+    "autoresearch-host": {
+      "os": "linux",
+      "arch": "x64",
+      "role": "linux-tui-autoresearch-client",
+      "profile": "autoresearch-host",
+      "desired": {
+        "kind": "npm-package",
+        "package": "cmux-tui-linux-x64",
+        "version": "0.9.9",
+        "integrity": "sha512-kdcqT9S0fx1HQRqa5/uQXfFyQUTA6JfcBCAVzbNRfS97HHKkDgt4sMCV0nbHWAAZrT2PxUqqqZxqZTqZBk/1RQ=="
+      },
+      "observedAt": "2026-08-02",
+      "status": "unverified"
+    }
+  }
+}
